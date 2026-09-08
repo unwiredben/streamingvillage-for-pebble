@@ -1,0 +1,137 @@
+{
+  "name": "Streaming Villa",
+  "author": "Ben Combee <combee@techwood.org>",
+  "version": "1.0.0",
+  "keywords": [
+    "pebble-app"
+  ],
+  "private": true,
+  "dependencies": {},
+  "pebble": {
+    "displayName": "Streaming Villa",
+    "uuid": "fb61b0cc-998d-4681-a12b-40205a9dd3b2",
+    "sdkVersion": "3",
+    "targetPlatforms": [
+      "emery"
+    ],
+    "watchapp": {
+      "watchface": true
+    },
+    "resources": {
+      "media": [
+        {
+          "type": "bitmap",
+          "name": "IMG_SKY",
+          "file": "images/sky.png",
+          "memoryFormat": "SmallestPalette",
+          "storageFormat": "pbi"
+        },
+        {
+          "type": "bitmap",
+          "name": "IMG_BG_0",
+          "file": "images/bg_0.png",
+          "memoryFormat": "SmallestPalette",
+          "storageFormat": "pbi"
+        },
+        {
+          "type": "bitmap",
+          "name": "IMG_BG_1",
+          "file": "images/bg_1.png",
+          "memoryFormat": "SmallestPalette",
+          "storageFormat": "pbi"
+        },
+        {
+          "type": "bitmap",
+          "name": "IMG_BG_2",
+          "file": "images/bg_2.png",
+          "memoryFormat": "SmallestPalette",
+          "storageFormat": "pbi"
+        },
+        {
+          "type": "bitmap",
+          "name": "IMG_BG_3",
+          "file": "images/bg_3.png",
+          "memoryFormat": "SmallestPalette",
+          "storageFormat": "pbi"
+        },
+        {
+          "type": "bitmap",
+          "name": "IMG_BG_4",
+          "file": "images/bg_4.png",
+          "memoryFormat": "SmallestPalette",
+          "storageFormat": "pbi"
+        },
+        {
+          "type": "bitmap",
+          "name": "IMG_BG_5",
+          "file": "images/bg_5.png",
+          "memoryFormat": "SmallestPalette",
+          "storageFormat": "pbi"
+        },
+        {
+          "type": "bitmap",
+          "name": "IMG_FG_0",
+          "file": "images/fg_0.png",
+          "memoryFormat": "SmallestPalette",
+          "storageFormat": "pbi"
+        },
+        {
+          "type": "bitmap",
+          "name": "IMG_FG_1",
+          "file": "images/fg_1.png",
+          "memoryFormat": "SmallestPalette",
+          "storageFormat": "pbi"
+        },
+        {
+          "type": "bitmap",
+          "name": "IMG_FG_2",
+          "file": "images/fg_2.png",
+          "memoryFormat": "SmallestPalette",
+          "storageFormat": "pbi"
+        },
+        {
+          "type": "bitmap",
+          "name": "IMG_FG_3",
+          "file": "images/fg_3.png",
+          "memoryFormat": "SmallestPalette",
+          "storageFormat": "pbi"
+        },
+        {
+          "type": "bitmap",
+          "name": "IMG_FG_4",
+          "file": "images/fg_4.png",
+          "memoryFormat": "SmallestPalette",
+          "storageFormat": "pbi"
+        },
+        {
+          "type": "bitmap",
+          "name": "IMG_FG_5",
+          "file": "images/fg_5.png",
+          "memoryFormat": "SmallestPalette",
+          "storageFormat": "pbi"
+        },
+        {
+          "type": "bitmap",
+          "name": "IMG_FG_6",
+          "file": "images/fg_6.png",
+          "memoryFormat": "SmallestPalette",
+          "storageFormat": "pbi"
+        },
+        {
+          "type": "bitmap",
+          "name": "IMG_FG_7",
+          "file": "images/fg_7.png",
+          "memoryFormat": "SmallestPalette",
+          "storageFormat": "pbi"
+        },
+        {
+          "type": "bitmap",
+          "name": "IMG_BB_0",
+          "file": "images/bb_0.png",
+          "memoryFormat": "SmallestPalette",
+          "storageFormat": "pbi"
+        }
+      ]
+    }
+  }
+}
