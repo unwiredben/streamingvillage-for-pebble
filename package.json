@@ -1,7 +1,7 @@
 {
   "name": "Streaming Villa",
   "author": "Ben Combee <combee@techwood.org>",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "keywords": [
     "pebble-app"
   ],
@@ -130,6 +130,12 @@
           "file": "images/bb_0.png",
           "memoryFormat": "SmallestPalette",
           "storageFormat": "pbi"
+        },
+        {
+          "type": "bitmap",
+          "name": "IMG_MENU_ICON",
+          "file": "images/menu_icon.png",
+          "menuIcon": true
         }
       ]
     }

@@ -187,9 +187,23 @@ static void tap_handler(AccelAxisType axis, int32_t direction) {
   start_animation();
 }
 
+// Losing focus means a notification or the timeline quick view is on top.
+// The scene is covered, or nearly so, so there is no point burning frames on
+// it: drop the run and let the next did_focus start a fresh one.
 static void focus_handler(bool in_focus) {
   if (in_focus) {
     start_animation();
+  } else if (s_timer) {
+    app_timer_cancel(s_timer);
+    s_timer = NULL;
+    s_passes_left = 0;
+    // Stopping mid-pass would strand the billboard wherever it happened to
+    // be, with the clock half off the edge -- which is the one thing the
+    // quick view needs to be able to read.  Come to rest the same way the
+    // end of a run does.
+    s_billboard.offset = SUBPIX(BB_REST_PX);
+    s_billboard.pause_left = 0;
+    layer_mark_dirty(s_scene_layer);
   }
 }
 

@@ -370,6 +370,57 @@ def gen_billboard():
     c.slice_tiles("bb", BB_TILES, BB_TILE_W)
 
 
+# ============================================================ menu icon ====
+# The launcher tints the icon, so it is drawn in greys only: the shades read
+# as an alpha ramp rather than as colours.  At 25px the scene has to be pared
+# back to the two things that identify the watchface -- the billboard on its
+# pole, and a skyline behind it.
+
+MENU_W = 25
+MENU_H = 25
+
+MENU_PANEL_Y = 2
+MENU_PANEL_H = 12
+MENU_POLE_X = 11
+MENU_POLE_W = 3
+
+# (x, width, top row).  The far row is the darker of the two greys, which at
+# this size is all the depth cueing there is room for.
+MENU_SKYLINE_FAR = ((1, 4, 18), (6, 3, 20), (10, 5, 17), (16, 4, 19),
+                    (21, 3, 18))
+MENU_SKYLINE_NEAR = ((0, 5, 21), (5, 4, 22), (9, 7, 21), (16, 5, 22),
+                     (21, 4, 21))
+
+# Four digit blocks and a colon, standing in for the clock on the panel.  Any
+# real glyphs would be illegible here, but the silhouette still reads as a
+# time.
+MENU_DIGITS = (4, 8, 14, 18)
+
+
+def gen_menu_icon():
+    c = Canvas(MENU_W, MENU_H)
+
+    for row, shade in ((MENU_SKYLINE_FAR, DKGREY), (MENU_SKYLINE_NEAR, GREY)):
+        for x, w, top in row:
+            c.rect(x, top, w, MENU_H - top, shade)
+
+    # The pole, with the same lit left edge the full-size billboard has.
+    c.rect(MENU_POLE_X, MENU_PANEL_Y + MENU_PANEL_H, MENU_POLE_W,
+           MENU_SKYLINE_NEAR[2][2] - (MENU_PANEL_Y + MENU_PANEL_H), GREY)
+    c.rect(MENU_POLE_X, MENU_PANEL_Y + MENU_PANEL_H, 1,
+           MENU_SKYLINE_NEAR[2][2] - (MENU_PANEL_Y + MENU_PANEL_H), WHITE)
+
+    # Frame, then the panel it surrounds, then the time on it.
+    c.rect(1, MENU_PANEL_Y, MENU_W - 2, MENU_PANEL_H, WHITE)
+    c.rect(2, MENU_PANEL_Y + 1, MENU_W - 4, MENU_PANEL_H - 2, DKGREY)
+    for x in MENU_DIGITS:
+        c.rect(x, MENU_PANEL_Y + 3, 3, 6, WHITE)
+    c.rect(12, MENU_PANEL_Y + 4, 1, 2, WHITE)
+    c.rect(12, MENU_PANEL_Y + 7, 1, 2, WHITE)
+
+    write_png(os.path.join(OUT_DIR, "menu_icon.png"), c)
+
+
 # ================================================================= main ====
 def main():
     if not os.path.isdir(OUT_DIR):
@@ -378,6 +429,7 @@ def main():
     gen_background()
     gen_foreground()
     gen_billboard()
+    gen_menu_icon()
 
     print("sky: 1 image, %d unique colours" %
           len(_read_colours(os.path.join(OUT_DIR, "sky.png"))))
