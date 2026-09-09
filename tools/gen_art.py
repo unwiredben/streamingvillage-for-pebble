@@ -19,6 +19,11 @@ import zlib
 OUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                        "..", "resources", "images")
 
+# Appstore artwork is not packed into the watch, so it lives outside the
+# resource tree.
+STORE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                         "..", "store")
+
 SCREEN_W = 200
 
 # ---------------------------------------------------------------- palette ---
@@ -421,6 +426,181 @@ def gen_menu_icon():
     write_png(os.path.join(OUT_DIR, "menu_icon.png"), c)
 
 
+# =========================================================== store icon ====
+# The appstore listing wants square artwork at a couple of sizes.  These are
+# not watch resources -- nothing here is packed into the app -- so the palette
+# limit does not apply, but the icons are still drawn from the same colours and
+# the same dither as the watchface so the listing and the watch match.
+#
+# Both sizes are composed natively rather than scaled from one master: at 80px
+# a downscale would turn the towers into mush, so the layout is expressed as
+# fractions of the icon and the detail thins out on its own as it shrinks.
+
+STORE_SIZES = (80, 144)
+
+# A 3x5 pixel font, enough for the time on the billboard.  Anything smaller
+# stops being readable at 80px and anything larger crowds the panel.
+FONT_3X5 = {
+    "0": ("###", "# #", "# #", "# #", "###"),
+    "1": (" # ", "## ", " # ", " # ", "###"),
+    "2": ("###", "  #", "###", "#  ", "###"),
+    "3": ("###", "  #", "###", "  #", "###"),
+    "4": ("# #", "# #", "###", "  #", "  #"),
+    "5": ("###", "#  ", "###", "  #", "###"),
+    "6": ("###", "#  ", "###", "# #", "###"),
+    "7": ("###", "  #", "  #", "  #", "  #"),
+    "8": ("###", "# #", "###", "# #", "###"),
+    "9": ("###", "# #", "###", "  #", "###"),
+    ":": (" ", "#", " ", "#", " "),
+}
+
+# The hour every watch in every catalogue photo shows.
+STORE_TIME = "10:09"
+
+
+def _text_width(text):
+    return sum(len(FONT_3X5[ch][0]) for ch in text) + len(text) - 1
+
+
+def _draw_text(c, text, x, y, scale, colour):
+    for ch in text:
+        glyph = FONT_3X5[ch]
+        for gy, row in enumerate(glyph):
+            for gx, bit in enumerate(row):
+                if bit == "#":
+                    c.rect(x + gx * scale, y + gy * scale, scale, scale, colour)
+        x += (len(glyph[0]) + 1) * scale
+
+
+def _blit(dst, src, y):
+    for j in range(src.h):
+        dst.px[y + j][:src.w] = list(src.px[j])
+
+
+def _store_sky(c, size, horizon):
+    """The same sunset as the watchface, requantised to the icon's height."""
+    stops, last = [], -1
+    for row, colour in SKY_STOPS:
+        row = row * horizon // SKY_H
+        if row <= last:                 # two stops collapsing at small sizes
+            row = last + 1
+        stops.append((row, colour))
+        last = row
+    sky = Canvas(size, stops[-1][0] + 1)
+    dither_gradient(sky, stops)
+    _blit(c, sky, 0)
+
+
+def _store_ridge(c, size, rnd):
+    base = size * 47 // 100
+    profile = [base] * size
+    for _ in range(max(3, size // 22)):
+        cx = rnd.randrange(size)
+        half = rnd.randint(size * 8 // 100, size * 26 // 100)
+        peak = base - rnd.randint(size * 4 // 100, size * 12 // 100)
+        for d in range(-half, half + 1):
+            h = peak + (base - peak) * abs(d) // half
+            x = cx + d
+            if 0 <= x < size and h < profile[x]:
+                profile[x] = h
+
+    for x, top in enumerate(profile):
+        c.rect(x, top, 1, size - top, HORIZON)
+        c.set(x, top, RIDGE_CREST)
+        # Carry the rim light up the risers so the crest stays unbroken.
+        if x + 1 < size:
+            for j in range(1, max(0, top - profile[x + 1]) + 1):
+                c.set(x, top - j, RIDGE_CREST)
+
+
+def _store_towers(c, size, ground, rnd):
+    win = max(1, size // 60)            # window block, 1px at 80 and 2px at 144
+    pitch = win * 3
+    x = 0
+    while x < size:
+        w = rnd.randint(size * 9 // 100, size * 19 // 100)
+        top = rnd.randint(size * 40 // 100, size * 62 // 100)
+        body = NAVY if rnd.random() < 0.65 else BLACK
+        edge = BLACK if body == NAVY else NAVY
+
+        c.rect(x, top, w, ground - top, body)
+        c.frame(x, top, w, ground - top, edge)
+
+        for wy in range(top + pitch, ground - pitch, pitch + win):
+            for wx in range(x + pitch, x + w - pitch, pitch + win):
+                if rnd.random() < 0.5:
+                    c.rect(wx, wy, win, win * 2, rnd.choice(WINDOW_COLOURS))
+
+        # A mast on the taller blocks, the one bit of roof furniture that still
+        # registers at this scale.
+        if rnd.random() < 0.3:
+            mast = x + w // 2
+            h = rnd.randint(size * 3 // 100, size * 8 // 100)
+            c.rect(mast, top - h, max(1, size // 90), h, edge)
+            c.set(mast, top - h - 1, MAGENTA)
+
+        x += w + rnd.randint(0, max(1, size // 60))
+
+
+def _store_street(c, size, ground):
+    kerb = max(2, size * 4 // 100)
+    c.rect(0, ground, size, kerb, DKGREY)
+    c.rect(0, ground + kerb, size, size - ground - kerb, BLACK)
+
+    dash = max(2, size * 6 // 100)
+    lane = ground + kerb + (size - ground - kerb) // 2
+    for dx in range(dash // 2, size, dash * 2):
+        c.rect(dx, lane, dash, max(1, size // 80), GREY)
+
+
+def _store_billboard(c, size, ground):
+    fw = size * 72 // 100
+    fh = size * 30 // 100
+    fx = (size - fw) // 2
+    fy = size * 20 // 100
+
+    # The frame's two rings, in the same proportions as the full-size art.
+    ring = max(1, round(2 * fw / 120.0))
+    inset = max(ring + 1, round(5 * fw / 120.0))
+
+    pole_w = max(3, fw * 10 // 120)
+    pole_x = fx + (fw - pole_w) // 2
+    c.rect(pole_x, fy + fh, pole_w, ground - fy - fh + 2, DKGREY)
+    c.rect(pole_x, fy + fh, max(1, pole_w // 4), ground - fy - fh + 2, GREY)
+
+    c.rect(fx, fy, fw, fh, GREY)
+    c.rect(fx + ring, fy + ring, fw - 2 * ring, fh - 2 * ring, BB_ACCENT)
+    c.rect(fx + inset, fy + inset, fw - 2 * inset, fh - 2 * inset, BLACK)
+
+    # Spotlights on the bottom rail, throwing a sliver of light upward.
+    lamp = max(2, fw // 20)
+    for sx in (fx + fw // 6, fx + fw - fw // 6 - lamp):
+        c.rect(sx, fy + fh, lamp, max(1, lamp // 2), DKGREY)
+        c.rect(sx, fy + fh + max(1, lamp // 2), lamp, max(1, lamp // 3), AMBER)
+
+    panel_w = fw - 2 * inset
+    panel_h = fh - 2 * inset
+    scale = min((panel_w - 2) // _text_width(STORE_TIME), (panel_h - 2) // 5)
+    scale = max(1, scale)
+    tw = _text_width(STORE_TIME) * scale
+    _draw_text(c, STORE_TIME, fx + inset + (panel_w - tw) // 2,
+               fy + inset + (panel_h - 5 * scale) // 2, scale, WHITE)
+
+
+def gen_store_icon(size):
+    rnd = random.Random(31415 + size)
+    c = Canvas(size, size, BLACK)
+    ground = size * 80 // 100
+
+    _store_sky(c, size, size * 52 // 100)
+    _store_ridge(c, size, rnd)
+    _store_towers(c, size, ground, rnd)
+    _store_street(c, size, ground)
+    _store_billboard(c, size, ground)
+
+    write_png(os.path.join(STORE_DIR, "icon-%d.png" % size), c)
+
+
 # ================================================================= main ====
 def main():
     if not os.path.isdir(OUT_DIR):
@@ -430,6 +610,10 @@ def main():
     gen_foreground()
     gen_billboard()
     gen_menu_icon()
+    if not os.path.isdir(STORE_DIR):
+        os.makedirs(STORE_DIR)
+    for size in STORE_SIZES:
+        gen_store_icon(size)
 
     print("sky: 1 image, %d unique colours" %
           len(_read_colours(os.path.join(OUT_DIR, "sky.png"))))
