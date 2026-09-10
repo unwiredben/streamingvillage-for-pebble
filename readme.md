@@ -1,4 +1,4 @@
-# Streaming Villa — a Pebble Time 2 watchface
+# Streaming Village — a Pebble Time 2 watchface
 
 A parallax cityscape at sunset. Three layers scroll right to left at different
 speeds, and the time rides past on a billboard.
@@ -16,7 +16,7 @@ has a `#error` guard so it can't be built for another platform by accident.
 | sky | 200x88 at y=0, opaque | 1 | static | the dithered sunset gradient |
 | background | 200x40 at y=48, transparent | 6 | ~3.75 px/s | mountain ridge with a rim-lit crest |
 | foreground | 200x200 at y=28, transparent | 8 | ~15 px/s | near towers with lit windows, street lamps, road |
-| billboard | 320x122 at y=134, transparent | 1 | ~30 px/s | the billboard that carries the time |
+| billboard | 120x122 at y=134, transparent; 320px repeat | 1 | ~30 px/s | the billboard that carries the time |
 
 The background is a shallow band and the towers are tall, so the sunset reads
 as a thin strip above the horizon rather than half the display. Most towers
@@ -28,13 +28,15 @@ them are mid purple, and the near towers are navy or black against it. The
 billboard sits just over the top of the road, in front of the street, on a
 single centre pole that runs off the bottom of the display.
 
-Each scrolling layer is authored as one seamless panorama and sliced into
-tiles. Every tile is at least as wide as the display, so any 200px viewport
-lands on exactly two adjacent tiles — a layer draw is two `graphics_draw_bitmap_in_rect` calls
-that the graphics context clips, and only two bitmaps per layer are ever
-resident. Scrolling one tile forward reuses the previous right-hand tile, so
+The background and foreground are authored as seamless panoramas and sliced
+into tiles. Every logical tile is at least as wide as the display, so any
+200px viewport overlaps at most two adjacent tiles. Images entirely outside
+the viewport are skipped; partially visible images are clipped by the graphics
+context. Only two bitmaps per layer are ever resident. Scrolling one tile forward reuses the previous right-hand tile, so
 crossing a boundary costs a single resource load. The billboard panorama is a
-single tile, so both halves of its draw share the one bitmap.
+single tile, so both halves of its draw share the one bitmap. Its stored image
+omits the 100px transparent margins on each side: it is drawn at a 100px inset
+within the unchanged 320px logical tile.
 
 Scroll positions are kept in 1/16ths of a pixel so the slow layers can move at
 fractional speeds without drifting.
@@ -89,6 +91,12 @@ than adding to it, and a run already in progress keeps its existing timer, so
 a tap or a second activation event resets the count instead of extending the
 run.
 
+Taps while unfocused cannot restart the animation. Each timer step still
+advances all three scroll positions, but requests a redraw only if an integer
+pixel position changes (or the run ends). An uninterrupted run takes 506
+steps and requests 486 animation redraws; the remaining 20 steps change only
+fractional positions during the billboard pauses.
+
 ### The billboard gap
 
 The billboard tile is 320px wide: the display width (200) plus the billboard
@@ -110,8 +118,8 @@ off the top instead.
 Because the scene stops, sampling those bounds during the animation is not
 enough on its own — an obstruction can arrive while the face is at rest. Two
 subscriptions cover that: `unobstructed_area_service_subscribe` marks the
-scene dirty as the notification slides in and out, and the minute tick does
-the same so the time still updates on a still scene.
+scene dirty when the notification's integer vertical displacement changes,
+and the minute tick does the same so the time still updates on a still scene.
 
 ## Memory
 
@@ -121,9 +129,9 @@ each palettised at the narrowest bit depth its colour count allows:
     sky         1 x  8,800   =  8,800   (4-bit, 9 colours)
     background  2 x  2,000   =  4,000   (2-bit, 3 colours)
     foreground  2 x 20,000   = 40,000   (4-bit, 9 colours)
-    billboard   1 x 19,520   = 19,520   (4-bit, 6 colours)
+    billboard   1 x  7,320   =  7,320   (4-bit, 6 colours)
                              --------
-                               72,320 bytes of emery's 128KB
+                               60,120 bytes of emery's 128KB
 
 Every layer's artwork stays at or under 16 unique colours, which is what lets
 the resources be declared `SmallestPalette` — the SDK then picks the narrowest
@@ -133,8 +141,8 @@ bits. The build fails loudly if a layer ever exceeds 16, and
 
 Resources are stored as `pbi` rather than `png`. PNG resources would be much
 smaller on flash — the dithered sky especially — but decoding one needs a
-transient buffer on top of the 72KB already resident, and the tiles are loaded
-mid-animation.
+transient buffer on top of the roughly 60KB already resident, and the tiles
+are loaded mid-animation.
 
 ## Artwork
 
@@ -154,3 +162,17 @@ grid. The layer geometry constants are duplicated in `tools/gen_art.py` and
     pebble build
     pebble install --emulator emery      # emulator
     pebble install --cloudpebble         # a real watch, via the phone
+
+## Regression checks
+
+After a build has generated the resource headers, run the C handler and draw
+geometry checks on the host (requires GCC and the Pebble SDK):
+
+    PEBBLE_SDK_INCLUDE=/path/to/sdk-core/pebble/emery/include bash tests/run_host_tests.sh
+    python3 -B tests/test_billboard_art.py
+
+The host checks replace platform timers and graphics calls with recording
+stubs. They cover focus loss and taps, animation completion and redraw counts,
+minute updates, obstruction movement, and billboard placement across all 320
+scroll positions with several notification offsets. The artwork check compares
+the cropped resource with the original full-width procedural artwork.

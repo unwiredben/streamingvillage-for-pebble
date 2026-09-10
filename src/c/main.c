@@ -3,7 +3,7 @@
 #include "city_layer.h"
 
 #if !defined(PBL_PLATFORM_EMERY)
-#error "Streaming Villa targets the Pebble Time 2 (emery) only."
+#error "Streaming Village targets the Pebble Time 2 (emery) only."
 #endif
 
 // ---------------------------------------------------------------------------
@@ -20,8 +20,8 @@
 #define FG_H 200
 #define FG_TILES 8
 
-#define BB_Y 134                 // billboards: 320x122, alpha.  The board sits
-                                 // just over the top of the road, on a pole
+#define BB_Y 134                 // billboard: 120x122, repeating every 320px.
+                                 // The board sits just over the top of the road, on a pole
                                  // that runs off the bottom of the display.
 #define BB_H 122
 #define BB_TILE_W 320
@@ -66,6 +66,8 @@
 static Window *s_window;
 static Layer *s_scene_layer;
 static AppTimer *s_timer;
+static bool s_in_focus;
+static int s_obstruction_dy;
 
 static GBitmap *s_sky;
 
@@ -154,6 +156,10 @@ static void scene_update_proc(Layer *layer, GContext *ctx) {
 static void frame_timer(void *context) {
   s_timer = NULL;
 
+  const int32_t bg_px = s_background.offset >> SUBPIX_SHIFT;
+  const int32_t fg_px = s_foreground.offset >> SUBPIX_SHIFT;
+  const int32_t bb_px = s_billboard.offset >> SUBPIX_SHIFT;
+
   city_layer_advance(&s_background);
   city_layer_advance(&s_foreground);
   city_layer_advance(&s_billboard);
@@ -169,7 +175,13 @@ static void frame_timer(void *context) {
     }
   }
 
-  layer_mark_dirty(s_scene_layer);
+  // Fractional movement is invisible until it crosses a pixel boundary.
+  // Keep advancing every frame, including during the billboard's pause.
+  if (bg_px != (s_background.offset >> SUBPIX_SHIFT) ||
+      fg_px != (s_foreground.offset >> SUBPIX_SHIFT) ||
+      bb_px != (s_billboard.offset >> SUBPIX_SHIFT)) {
+    layer_mark_dirty(s_scene_layer);
+  }
   s_timer = app_timer_register(FRAME_MS, frame_timer, NULL);
 }
 
@@ -177,6 +189,9 @@ static void frame_timer(void *context) {
 // both .appear and did_focus, so this has to be idempotent: it sets the count
 // rather than adding to it, and a run in progress keeps its existing timer.
 static void start_animation(void) {
+  if (!s_in_focus) {
+    return;
+  }
   s_passes_left = BB_PASSES;
   if (!s_timer) {
     s_timer = app_timer_register(FRAME_MS, frame_timer, NULL);
@@ -191,6 +206,7 @@ static void tap_handler(AccelAxisType axis, int32_t direction) {
 // The scene is covered, or nearly so, so there is no point burning frames on
 // it: drop the run and let the next did_focus start a fresh one.
 static void focus_handler(bool in_focus) {
+  s_in_focus = in_focus;
   if (in_focus) {
     start_animation();
   } else if (s_timer) {
@@ -211,7 +227,13 @@ static void focus_handler(bool in_focus) {
 // this is what repositions it as a notification slides in or out.
 static void unobstructed_change_handler(AnimationProgress progress,
                                         void *context) {
-  layer_mark_dirty(s_scene_layer);
+  const GRect bounds = layer_get_bounds(s_scene_layer);
+  const GRect visible = layer_get_unobstructed_bounds(s_scene_layer);
+  const int dy = -(bounds.size.h - visible.size.h);
+  if (dy != s_obstruction_dy) {
+    s_obstruction_dy = dy;
+    layer_mark_dirty(s_scene_layer);
+  }
 }
 
 static void tick_handler(struct tm *tick_time, TimeUnits units_changed) {
@@ -231,6 +253,7 @@ static void window_load(Window *window) {
                   FG_SPEED);
   city_layer_init(&s_billboard, s_bb_ids, BB_TILES, BB_TILE_W, BB_H, BB_Y,
                   BB_SPEED);
+  s_billboard.image_x = BB_FRAME_X;
   city_layer_set_pause(&s_billboard, BB_CLEAR_AT, BB_PAUSE_MS, FRAME_MS);
 
   s_billboard.offset = SUBPIX(BB_REST_PX);
@@ -238,9 +261,12 @@ static void window_load(Window *window) {
   s_scene_layer = layer_create(bounds);
   layer_set_update_proc(s_scene_layer, scene_update_proc);
   layer_add_child(window_get_root_layer(window), s_scene_layer);
+  const GRect visible = layer_get_unobstructed_bounds(s_scene_layer);
+  s_obstruction_dy = -(bounds.size.h - visible.size.h);
 }
 
 static void window_appear(Window *window) {
+  s_in_focus = true;
   start_animation();
 }
 
@@ -279,7 +305,7 @@ static void init(void) {
     .change = unobstructed_change_handler,
   }, NULL);
 
-  APP_LOG(APP_LOG_LEVEL_INFO, "streaming villa: %u bytes heap free",
+  APP_LOG(APP_LOG_LEVEL_INFO, "streaming village: %u bytes heap free",
           (unsigned)heap_bytes_free());
 }
 

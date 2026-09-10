@@ -1,14 +1,14 @@
 {
-  "name": "Streaming Villa",
+  "name": "Streaming Village",
   "author": "Ben Combee <combee@techwood.org>",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "keywords": [
     "pebble-app"
   ],
   "private": true,
   "dependencies": {},
   "pebble": {
-    "displayName": "Streaming Villa",
+    "displayName": "Streaming Village",
     "uuid": "fb61b0cc-998d-4681-a12b-40205a9dd3b2",
     "sdkVersion": "3",
     "targetPlatforms": [

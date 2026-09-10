@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Generate the parallax cityscape artwork for the Streaming Villa watchface.
+"""Generate the parallax cityscape artwork for the Streaming Village watchface.
 
-Each layer is authored as one seamless panorama, then sliced into 200px-wide
-tiles.  200px is the width of the Pebble Time 2 display, which guarantees that
-any 200px viewport lands on exactly two adjacent tiles -- the watchface only
-ever has to hold two bitmaps per layer in memory.
+The background and foreground are authored as seamless panoramas, then sliced
+into 200px-wide tiles. The billboard is cropped to its 120px artwork width,
+with a 320px logical repeat on the watch. A viewport overlaps at most two
+logical tiles, so only two bitmaps per layer need to be held in memory.
 
 Every colour below is on Pebble's 64-colour grid (channels drawn from
 0/85/170/255) and each layer stays at or under 16 unique colours so the
@@ -370,9 +370,11 @@ def _billboard(c, x, accent):
 
 
 def gen_billboard():
-    c = Canvas(BB_W, BB_H)
-    _billboard(c, BB_FRAME_X, BB_ACCENT)
-    c.slice_tiles("bb", BB_TILES, BB_TILE_W)
+    # Keep the 320px logical repeat in the watchface, but do not store its
+    # 100px transparent margins on either side of the 120px artwork.
+    c = Canvas(BB_FRAME_W, BB_H)
+    _billboard(c, 0, BB_ACCENT)
+    write_png(os.path.join(OUT_DIR, "bb_0.png"), c)
 
 
 # ============================================================ menu icon ====

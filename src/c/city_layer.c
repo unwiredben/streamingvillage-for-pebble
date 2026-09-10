@@ -129,13 +129,20 @@ int city_layer_draw(CityLayer *layer, GContext *ctx, int dy) {
   GBitmap *right = layer->slot[layer->bind[1]];
   const int y = layer->y + dy;
   if (left) {
-    graphics_draw_bitmap_in_rect(
-        ctx, left, GRect(origin, y, layer->tile_w, layer->height));
+    const GRect bounds = gbitmap_get_bounds(left);
+    const int x = origin + layer->image_x;
+    if (x < PBL_DISPLAY_WIDTH && x + bounds.size.w > 0) {
+      graphics_draw_bitmap_in_rect(ctx, left,
+                                   GRect(x, y, bounds.size.w, bounds.size.h));
+    }
   }
   if (right) {
-    graphics_draw_bitmap_in_rect(
-        ctx, right, GRect(origin + layer->tile_w, y, layer->tile_w,
-                          layer->height));
+    const GRect bounds = gbitmap_get_bounds(right);
+    const int x = origin + layer->tile_w + layer->image_x;
+    if (x < PBL_DISPLAY_WIDTH && x + bounds.size.w > 0) {
+      graphics_draw_bitmap_in_rect(ctx, right,
+                                   GRect(x, y, bounds.size.w, bounds.size.h));
+    }
   }
   return origin;
 }

@@ -3,7 +3,7 @@
 #include <pebble.h>
 
 // A layer's tiles are never narrower than the display, so the 200px viewport
-// always overlaps exactly two adjacent tiles.  That is what lets a layer keep
+// always overlaps at most two adjacent logical tiles.  That lets a layer keep
 // just two bitmaps resident no matter how long its panorama is.
 #define MIN_TILE_W PBL_DISPLAY_WIDTH
 
@@ -15,7 +15,8 @@
 typedef struct {
   const uint32_t *ids;   // one resource id per tile, left to right
   uint8_t count;         // number of tiles in the panorama
-  int16_t tile_w;        // tile width, >= MIN_TILE_W
+  int16_t tile_w;        // logical repeat width, >= MIN_TILE_W
+  int16_t image_x;       // image inset within the logical tile (cropped margins)
   int16_t height;        // tile height in pixels
   int16_t y;             // where the layer sits on screen
   int16_t speed;         // scroll speed, in subpixels per frame
@@ -49,9 +50,9 @@ int32_t city_layer_distance_to(const CityLayer *layer, int32_t offset);
 // Advances the layer by one frame's worth of scrolling.
 void city_layer_advance(CityLayer *layer);
 
-// Draws the two tiles straddling the viewport, each clipped by the graphics
-// context.  `dy` shifts the layer vertically, which is how the scene slides up
-// out from under an obstruction.  Returns the screen x of the left-hand tile's
+// Draws visible images in the two tiles straddling the viewport, using each
+// bitmap's actual size and image_x inset. `dy` shifts the layer vertically,
+// which is how the scene slides up out from under an obstruction.  Returns the screen x of the left-hand tile's
 // origin, which is what a caller needs to locate features drawn inside the
 // tiles.
 int city_layer_draw(CityLayer *layer, GContext *ctx, int dy);
