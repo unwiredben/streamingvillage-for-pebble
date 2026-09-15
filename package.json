@@ -1,7 +1,7 @@
 {
   "name": "Streaming Village",
   "author": "Ben Combee <combee@techwood.org>",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "keywords": [
     "pebble-app"
   ],
@@ -12,6 +12,7 @@
     "uuid": "fb61b0cc-998d-4681-a12b-40205a9dd3b2",
     "sdkVersion": "3",
     "targetPlatforms": [
+      "basalt",
       "emery"
     ],
     "watchapp": {

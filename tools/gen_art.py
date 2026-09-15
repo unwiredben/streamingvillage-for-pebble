@@ -2,13 +2,19 @@
 """Generate the parallax cityscape artwork for the Streaming Village watchface.
 
 The background and foreground are authored as seamless panoramas, then sliced
-into 200px-wide tiles. The billboard is cropped to its 120px artwork width,
-with a 320px logical repeat on the watch. A viewport overlaps at most two
-logical tiles, so only two bitmaps per layer need to be held in memory.
+into display-width tiles.  The billboard is cropped to its artwork width, with
+a logical repeat of one display width plus one board on the watch.  A viewport
+overlaps at most two logical tiles, so only two bitmaps per layer need to be
+held in memory.
 
 Every colour below is on Pebble's 64-colour grid (channels drawn from
 0/85/170/255) and each layer stays at or under 16 unique colours so the
 resources can be built as 4-bit palettised bitmaps.
+
+The scene is generated once per target platform.  Files are written with a
+`~platform` tag -- `fg_0~emery.png`, `fg_0~basalt.png` -- which is how the SDK
+picks the right set: package.json declares the bare `images/fg_0.png` and
+`find_most_specific_filename` resolves it against the platform's tags.
 """
 
 import os
@@ -23,8 +29,6 @@ OUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
 # resource tree.
 STORE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                          "..", "store")
-
-SCREEN_W = 200
 
 # ---------------------------------------------------------------- palette ---
 CLEAR    = (0, 0, 0, 0)
@@ -51,6 +55,152 @@ STEEL    = (85, 85, 170, 255)
 # to be exactly it or the seam shows.
 HORIZON = IMPURPLE
 RIDGE_CREST = RAJAH
+
+
+# =============================================================== geometry ====
+# Every constant that depends on the display size lives in a Layout.  emery is
+# the reference the artwork was authored against; a smaller platform derives
+# from it by integer scaling arranged to be the identity at 200x228, so
+# regenerating after a change here has to leave the emery PNGs byte-identical.
+#
+# Decorative detail is *not* scaled.  At 0.72x a window grid turns to mush and
+# a 1px rim light disappears, so each platform lists its own -- see DECO.
+#
+# main.c carries the same layout in its own #defines.  Change them together or
+# the layers stop lining up; tests/test_billboard_art.py checks the invariants
+# both files derive from.
+EMERY_W, EMERY_H = 200, 228
+
+# Authored reference for the sky gradient stops, below.
+SKY_REF_H = 88
+
+
+def _even(value):
+    """Rounds up to an even number, so a centred inset stays symmetric."""
+    return (value + 1) & ~1
+
+
+class Layout(object):
+    def __init__(self, name, screen_w, screen_h, deco):
+        self.name = name
+        self.SCREEN_W = screen_w
+        self.SCREEN_H = screen_h
+        self.deco = deco
+
+        def x(value):                   # a horizontal length
+            return value * screen_w // EMERY_W
+
+        def y(value):                   # a vertical length
+            return value * screen_h // EMERY_H
+
+        # -- sky: static, from the top of the screen down to the ridge --
+        self.SKY_H = y(SKY_REF_H)
+
+        # -- background: the ridge, bottom-aligned on the sky --
+        self.BG_TILES = 6
+        self.BG_W = screen_w * self.BG_TILES
+        self.BG_H = y(40)
+        self.BG_Y = self.SKY_H - self.BG_H
+        self.BG_RIDGE_FLOOR = 8 * self.BG_H // 40
+        self.BG_PEAK_MIN = 18 * self.BG_H // 40
+        self.BG_PEAK_MAX = 32 * self.BG_H // 40
+        self.BG_PEAK_COUNT = 22 * self.BG_W // 1200
+        self.BG_PEAK_HALF_MIN = x(26)
+        self.BG_PEAK_HALF_MAX = x(62)
+
+        # -- foreground: towers and street, bottom-aligned on the screen --
+        self.FG_TILES = 8
+        self.FG_W = screen_w * self.FG_TILES
+        self.FG_H = y(200)
+        self.FG_Y = screen_h - self.FG_H
+        self.FG_GROUND = 158 * self.FG_H // 200
+        self.FG_LANE_MARK = 180 * self.FG_H // 200
+        # Most towers top out below the mountain valleys so the ridge stays
+        # visible; a few landmarks cut up through it.
+        self.FG_TOP_LANDMARK = (26 * self.FG_H // 200, 52 * self.FG_H // 200)
+        self.FG_TOP_COMMON = (58 * self.FG_H // 200, 90 * self.FG_H // 200)
+        self.FG_STUB_TOP = 90 * self.FG_H // 200
+
+        # -- billboard: a tile one display wider than the board, so the board
+        #    clears the left edge exactly as its repeat reaches the right one --
+        self.BB_TILES = 1
+        self.BB_FRAME_W = _even(x(120))
+        self.BB_FRAME_H = y(68)
+        self.BB_H = y(122)
+        self.BB_Y = y(134)
+        self.BB_TILE_W = screen_w + self.BB_FRAME_W
+        self.BB_FRAME_X = (self.BB_TILE_W - self.BB_FRAME_W) // 2
+        self.BB_POLE_W = _even(x(10))
+
+        # The blank interior the watchface draws the time into.  It is inset
+        # further than the artwork's own black panel, so nothing crowds the
+        # digits.
+        self.BB_PANEL_X = self.BB_FRAME_X + deco["panel_inset"]
+        self.BB_PANEL_W = self.BB_FRAME_W - 2 * deco["panel_inset"]
+        self.BB_PANEL_Y = 12 * self.BB_FRAME_H // 68
+        self.BB_PANEL_H = 44 * self.BB_FRAME_H // 68
+
+
+EMERY_DECO = {
+    # billboard
+    "panel_inset": 8,
+    "ring": 2, "art_inset": 5, "pole_lit": 2,
+    "spot_left": 14, "spot_right": 18,
+    "spot_w": 4, "spot_h": 3, "spot_glow": 1,
+    # towers
+    "tower_w": (24, 54),
+    "win_top": 5, "win_bottom": 8, "win_step": 10,
+    "win_left": 4, "win_right": 6, "win_pitch": 8,
+    "win_w": 3, "win_h": 5,
+    "mast_rise": (6, 18), "mast_h": 18, "mast_tip": 19,
+    "box_min": 6, "box_h": 6, "box_cap": 2,
+    "neon_min_w": 30, "neon_inset": 8, "neon_drop": (8, 24),
+    "neon_w": 4, "neon_h": 26,
+    # street
+    "kerb_h": 7, "kerb_line": 5, "kerb_line_h": 2,
+    "dash_step": 24, "dash_w": 12, "dash_h": 3,
+    "lamp_start": 20, "lamp_step": 100, "lamp_h": 34,
+    "arm_dx": 3, "arm_w": 8, "arm_h": 3,
+    "glow_dx": 2, "glow_w": 6, "glow_h": 2,
+}
+
+BASALT_DECO = {
+    "panel_inset": 6,
+    "ring": 2, "art_inset": 5, "pole_lit": 2,
+    "spot_left": 10, "spot_right": 13,
+    "spot_w": 3, "spot_h": 2, "spot_glow": 1,
+    "tower_w": (18, 40),
+    "win_top": 4, "win_bottom": 6, "win_step": 8,
+    "win_left": 3, "win_right": 5, "win_pitch": 6,
+    "win_w": 2, "win_h": 4,
+    "mast_rise": (4, 13), "mast_h": 13, "mast_tip": 14,
+    "box_min": 4, "box_h": 4, "box_cap": 2,
+    "neon_min_w": 22, "neon_inset": 6, "neon_drop": (6, 18),
+    "neon_w": 3, "neon_h": 19,
+    "kerb_h": 5, "kerb_line": 3, "kerb_line_h": 2,
+    "dash_step": 18, "dash_w": 9, "dash_h": 2,
+    "lamp_start": 14, "lamp_step": 72, "lamp_h": 25,
+    "arm_dx": 2, "arm_w": 6, "arm_h": 2,
+    "glow_dx": 1, "glow_w": 4, "glow_h": 2,
+}
+
+PLATFORMS = {
+    "emery": Layout("emery", 200, 228, EMERY_DECO),
+    "basalt": Layout("basalt", 144, 168, BASALT_DECO),
+}
+
+# The layout every generator below reads.  select() points it at a platform.
+L = PLATFORMS["emery"]
+
+
+def select(platform):
+    global L
+    L = PLATFORMS[platform]
+    return L
+
+
+def art_path(stem):
+    return os.path.join(OUT_DIR, "%s~%s.png" % (stem, L.name))
 
 
 # ------------------------------------------------------------- png writer ---
@@ -103,14 +253,15 @@ class Canvas(object):
         for y0, y1, c in spec:
             self.rect(0, y0, self.w, y1 - y0, c)
 
-    def slice_tiles(self, prefix, count, tile_w=SCREEN_W):
+    def slice_tiles(self, prefix, count, tile_w=None):
+        tile_w = L.SCREEN_W if tile_w is None else tile_w
         for t in range(count):
             tile = Canvas(tile_w, self.h)
             for y in range(self.h):
                 src = self.px[y]
                 tile.px[y] = [src[(t * tile_w + x) % self.w]
                               for x in range(tile_w)]
-            write_png(os.path.join(OUT_DIR, "%s_%d.png" % (prefix, t)), tile)
+            write_png(art_path("%s_%d" % (prefix, t)), tile)
 
 
 # ------------------------------------------------------------- dithering ---
@@ -135,7 +286,7 @@ def _bit_reverse_6(value):
 
 
 DITHER_SEQ = tuple(_bit_reverse_6(i) for i in range(DITHER_LEVELS))
-_DITHER_ROTATION = random.Random(4242)
+DITHER_SEED = 4242
 
 
 def dither_gradient(canvas, stops):
@@ -144,7 +295,11 @@ def dither_gradient(canvas, stops):
     `stops` is a list of (row, colour).  A row lands on its stop's colour
     exactly, and rows between two stops are an ordered mix of the pair -- so
     repeating a colour in consecutive stops yields a solid band.
+
+    The per-row rotation stream restarts for every gradient, so an image's
+    dither depends only on that image and not on what was generated before it.
     """
+    rotations = random.Random(DITHER_SEED)
     for y in range(canvas.h):
         lo, hi = stops[0], stops[1]
         for i in range(len(stops) - 1):
@@ -152,7 +307,7 @@ def dither_gradient(canvas, stops):
                 lo, hi = stops[i], stops[i + 1]
                 break
         t = (y - lo[0]) / float(hi[0] - lo[0])
-        rotation = _DITHER_ROTATION.randrange(DITHER_LEVELS)
+        rotation = rotations.randrange(DITHER_LEVELS)
         for x in range(canvas.w):
             threshold = DITHER_SEQ[(x + rotation) % DITHER_LEVELS]
             canvas.set(x, y,
@@ -164,10 +319,10 @@ def dither_gradient(canvas, stops):
 # covering everything above the ground haze.  Keeping it out of the scrolling
 # background matters: a dithered gradient that slid sideways would make the
 # dither pattern crawl.
-SKY_H = 88
-
+#
 # The glow has to finish above the ridge line, since the mountains cover
-# everything below their crest.
+# everything below their crest.  Rows are authored against SKY_REF_H and
+# requantised to whatever the platform's sky height is.
 SKY_STOPS = (
     (0, NAVY), (12, NAVY),      # solid night at the top
     (22, IMPURPLE),
@@ -177,211 +332,205 @@ SKY_STOPS = (
     (54, FOLLY),
     (59, MELON),
     (64, RAJAH),
-    (70, AMBER), (SKY_H, AMBER),  # horizon glow, behind the mountains
+    (70, AMBER), (SKY_REF_H, AMBER),  # horizon glow, behind the mountains
 )
 
 
+def scale_stops(stops, height):
+    """Requantises gradient stops from SKY_REF_H rows to `height` rows."""
+    out, last = [], -1
+    for row, colour in stops:
+        row = row * height // SKY_REF_H
+        if row <= last:                 # two stops collapsing at small sizes
+            row = last + 1
+        out.append((row, colour))
+        last = row
+    return out
+
+
 def gen_sky():
-    c = Canvas(SCREEN_W, SKY_H)
-    dither_gradient(c, SKY_STOPS)
-    write_png(os.path.join(OUT_DIR, "sky.png"), c)
+    c = Canvas(L.SCREEN_W, L.SKY_H)
+    dither_gradient(c, scale_stops(SKY_STOPS, L.SKY_H))
+    write_png(art_path("sky"), c)
 
 
 # =========================================================== background ====
-# 40px tall, drawn at screen y=48, transparent above the ridge line.  The
-# gradient behind it comes from the static sky bitmap, so this layer is nothing
-# but mountains: a silhouette that fills solid from its crest all the way to
-# the bottom edge of the tile, where main.c's ground fill picks the same colour
-# up and carries it to the bottom of the screen.
-BG_H = 40
-BG_W = 1200
-BG_TILES = BG_W // SCREEN_W
-
-BG_RIDGE_FLOOR = 8       # valley height above the bottom edge, in rows
-BG_PEAK_MIN = 18         # peak height above the bottom edge
-BG_PEAK_MAX = 32
-BG_PEAK_COUNT = 22
-BG_PEAK_HALF_MIN = 26    # half-width of a peak, in pixels
-BG_PEAK_HALF_MAX = 62
-
-
+# Drawn just above the sky's bottom edge, transparent above the ridge line.
+# The gradient behind it comes from the static sky bitmap, so this layer is
+# nothing but mountains: a silhouette that fills solid from its crest all the
+# way to the bottom edge of the tile, where main.c's ground fill picks the same
+# colour up and carries it to the bottom of the screen.
 def _ridge_profile(rnd):
     """A mountain skyline: the upper envelope of a set of triangular peaks.
 
     Peak positions are taken modulo the panorama width, so a peak may straddle
     the seam and the profile loops exactly -- no easing needed at the ends.
     """
-    profile = [BG_RIDGE_FLOOR] * BG_W
-    for _ in range(BG_PEAK_COUNT):
-        cx = rnd.randrange(BG_W)
-        half = rnd.randint(BG_PEAK_HALF_MIN, BG_PEAK_HALF_MAX)
-        peak = rnd.randint(BG_PEAK_MIN, BG_PEAK_MAX)
+    profile = [L.BG_RIDGE_FLOOR] * L.BG_W
+    for _ in range(L.BG_PEAK_COUNT):
+        cx = rnd.randrange(L.BG_W)
+        half = rnd.randint(L.BG_PEAK_HALF_MIN, L.BG_PEAK_HALF_MAX)
+        peak = rnd.randint(L.BG_PEAK_MIN, L.BG_PEAK_MAX)
         for d in range(-half, half + 1):
             # Triangular falloff, with a little jitter so the slopes are not
             # perfectly straight.
-            h = peak - (peak - BG_RIDGE_FLOOR) * abs(d) // half
+            h = peak - (peak - L.BG_RIDGE_FLOOR) * abs(d) // half
             h += rnd.choice((0, 0, 0, 1, -1))
-            x = (cx + d) % BG_W
+            x = (cx + d) % L.BG_W
             if h > profile[x]:
                 profile[x] = h
     return profile
 
 
 def gen_background():
-    c = Canvas(BG_W, BG_H)
+    c = Canvas(L.BG_W, L.BG_H)
     rnd = random.Random(20260908)
     ridge = _ridge_profile(rnd)
 
     for x, h in enumerate(ridge):
-        top = BG_H - h
+        top = L.BG_H - h
         c.rect(x, top, 1, h, HORIZON)
         # Rim light where the sunset catches the crest.  Step pixels get it
         # too, so the line stays unbroken up the steeper slopes.
         c.set(x, top, RIDGE_CREST)
-        step = ridge[(x + 1) % BG_W] - h
+        step = ridge[(x + 1) % L.BG_W] - h
         for j in range(1, max(0, step) + 1):
             c.set(x, top - j, RIDGE_CREST)
 
-    c.slice_tiles("bg", BG_TILES)
+    c.slice_tiles("bg", L.BG_TILES)
 
 
 # =========================================================== foreground ====
-# 200px tall with transparency, drawn at screen y=28 so its street lands on
-# the bottom edge of the display.  The towers are deliberately tall: they crowd
-# the sky down to a thin band of sunset above the horizon.
-FG_W, FG_H = 1600, 200
-FG_TILES = FG_W // SCREEN_W
-
-FG_GROUND = 158          # top of the sidewalk, in layer-local rows
-FG_LANE_MARK = 180       # centre line of the road
+# Bottom-aligned on the display so its street lands on the bottom edge.  The
+# towers are deliberately tall: they crowd the sky down to a thin band of
+# sunset above the horizon.
 WINDOW_COLOURS = (AMBER, AMBER, PALE, CYAN)
 
 
 def _tower(c, x, w, top, body, rnd):
+    d = L.deco
     # The outline is always the other body colour, so neighbouring towers stay
     # separated whichever way round they fall.
     edge = BLACK if body == NAVY else NAVY
-    c.rect(x, top, w, FG_GROUND - top, body)
-    c.frame(x, top, w, FG_GROUND - top, edge)
+    c.rect(x, top, w, L.FG_GROUND - top, body)
+    c.frame(x, top, w, L.FG_GROUND - top, edge)
 
     # Window grid, inset so it never touches the outline.
-    for wy in range(top + 5, FG_GROUND - 8, 10):
-        for wx in range(x + 4, x + w - 6, 8):
+    for wy in range(top + d["win_top"], L.FG_GROUND - d["win_bottom"],
+                    d["win_step"]):
+        for wx in range(x + d["win_left"], x + w - d["win_right"],
+                        d["win_pitch"]):
             if rnd.random() < 0.55:
-                c.rect(wx, wy, 3, 5, rnd.choice(WINDOW_COLOURS))
+                c.rect(wx, wy, d["win_w"], d["win_h"],
+                       rnd.choice(WINDOW_COLOURS))
 
     # Roof furniture.
     roll = rnd.random()
     if roll < 0.35:
         mast = x + w // 2
-        c.rect(mast, top - rnd.randint(6, 18), 1, 18, edge)
-        c.set(mast, top - 19, MAGENTA)
+        c.rect(mast, top - rnd.randint(*d["mast_rise"]), 1, d["mast_h"], edge)
+        c.set(mast, top - d["mast_tip"], MAGENTA)
     elif roll < 0.6:
-        tw = max(6, w // 3)
-        c.rect(x + (w - tw) // 2, top - 6, tw, 6, body)
-        c.rect(x + (w - tw) // 2, top - 8, tw, 2, DKGREY)
+        tw = max(d["box_min"], w // 3)
+        c.rect(x + (w - tw) // 2, top - d["box_h"], tw, d["box_h"], body)
+        c.rect(x + (w - tw) // 2, top - d["box_h"] - d["box_cap"], tw,
+               d["box_cap"], DKGREY)
 
     # A vertical neon sign on some facades.
-    if w >= 30 and rnd.random() < 0.3:
-        sx = x + w - 8
-        sy = top + rnd.randint(8, 24)
-        c.rect(sx, sy, 4, 26, MAGENTA)
-        c.frame(sx, sy, 4, 26, edge)
+    if w >= d["neon_min_w"] and rnd.random() < 0.3:
+        sx = x + w - d["neon_inset"]
+        sy = top + rnd.randint(*d["neon_drop"])
+        c.rect(sx, sy, d["neon_w"], d["neon_h"], MAGENTA)
+        c.frame(sx, sy, d["neon_w"], d["neon_h"], edge)
 
 
 def gen_foreground():
-    c = Canvas(FG_W, FG_H)
+    d = L.deco
+    c = Canvas(L.FG_W, L.FG_H)
     rnd = random.Random(776211)
 
     x = 0
-    while x < FG_W:
-        w = rnd.randint(24, 54)
-        if x + w > FG_W:                      # last block closes the loop
-            w = FG_W - x
+    while x < L.FG_W:
+        w = rnd.randint(*d["tower_w"])
+        if x + w > L.FG_W:                    # last block closes the loop
+            w = L.FG_W - x
             if w < 18:
-                c.rect(x, 90, w, FG_GROUND - 90, NAVY)
+                c.rect(x, L.FG_STUB_TOP, w, L.FG_GROUND - L.FG_STUB_TOP, NAVY)
                 break
-        # Most towers top out below the mountain valleys so the ridge stays
-        # visible; a few landmarks cut up through it.
-        top = (rnd.randint(26, 52) if rnd.random() < 0.2
-               else rnd.randint(58, 90))
+        top = (rnd.randint(*L.FG_TOP_LANDMARK) if rnd.random() < 0.2
+               else rnd.randint(*L.FG_TOP_COMMON))
         # Near buildings are darker than the distant land, which keeps the
         # ridge line reading as depth rather than more city.
         _tower(c, x, w, top, NAVY if rnd.random() < 0.65 else BLACK, rnd)
         x += w + rnd.randint(0, 3)
 
     # Street: sidewalk, asphalt, dashed centre line.
-    c.rect(0, FG_GROUND, FG_W, 7, DKGREY)
-    c.rect(0, FG_GROUND + 5, FG_W, 2, BLACK)
-    c.rect(0, FG_GROUND + 7, FG_W, FG_H - FG_GROUND - 7, BLACK)
-    for dx in range(0, FG_W, 24):
-        c.rect(dx, FG_LANE_MARK, 12, 3, GREY)
+    c.rect(0, L.FG_GROUND, L.FG_W, d["kerb_h"], DKGREY)
+    c.rect(0, L.FG_GROUND + d["kerb_line"], L.FG_W, d["kerb_line_h"], BLACK)
+    c.rect(0, L.FG_GROUND + d["kerb_h"], L.FG_W,
+           L.FG_H - L.FG_GROUND - d["kerb_h"], BLACK)
+    for dx in range(0, L.FG_W, d["dash_step"]):
+        c.rect(dx, L.FG_LANE_MARK, d["dash_w"], d["dash_h"], GREY)
 
     # Street lamps, spaced along the sidewalk.
-    for lx in range(20, FG_W, 100):
-        c.rect(lx, FG_GROUND - 34, 2, 34, DKGREY)
-        c.rect(lx - 3, FG_GROUND - 37, 8, 3, DKGREY)
-        c.rect(lx - 2, FG_GROUND - 34, 6, 2, AMBER)
+    for lx in range(d["lamp_start"], L.FG_W, d["lamp_step"]):
+        c.rect(lx, L.FG_GROUND - d["lamp_h"], 2, d["lamp_h"], DKGREY)
+        c.rect(lx - d["arm_dx"], L.FG_GROUND - d["lamp_h"] - d["arm_h"],
+               d["arm_w"], d["arm_h"], DKGREY)
+        c.rect(lx - d["glow_dx"], L.FG_GROUND - d["lamp_h"], d["glow_w"],
+               d["glow_h"], AMBER)
 
-    c.slice_tiles("fg", FG_TILES)
+    c.slice_tiles("fg", L.FG_TILES)
 
 
 # ============================================================ billboard ====
-# 90px tall with transparency, drawn at screen y=100.  A single 320px tile is
-# the whole panorama: it is wider than the display, so a 200px viewport still
-# only ever spans two tiles -- here the same tile twice, sharing one bitmap.
-# 320 is exactly the display width plus the billboard width, which means the
-# billboard clears the left edge at the very moment its repeat reaches the
-# right edge; the watchface inserts its own pause there to keep the billboard
-# away for a couple of seconds.
-BB_TILE_W = 320
-BB_H = 122
-BB_TILES = 1
-BB_W = BB_TILE_W * BB_TILES
-
-BB_FRAME_X = 100         # frame origin within a tile, centred
-BB_FRAME_W = 120
-BB_FRAME_H = 68
-BB_PANEL_X = 108         # interior the watchface draws the time into
-BB_PANEL_Y = 12
-BB_PANEL_W = 104
-BB_PANEL_H = 44
-BB_POLE_W = 10
-
+# A single tile is the whole panorama: it is wider than the display, so the
+# viewport still only ever spans two tiles -- here the same tile twice, sharing
+# one bitmap.  The tile is exactly the display width plus the billboard width,
+# which means the billboard clears the left edge at the very moment its repeat
+# reaches the right edge; the watchface inserts its own pause there to keep the
+# billboard away for a couple of seconds.
+#
 # The panel interior stays empty so nothing crowds the time.
 BB_ACCENT = PURPLE
 
 
 def _billboard(c, x, accent):
-    c.rect(x, 0, BB_FRAME_W, BB_FRAME_H, GREY)
-    c.rect(x + 2, 2, BB_FRAME_W - 4, BB_FRAME_H - 4, accent)
-    c.rect(x + 5, 5, BB_FRAME_W - 10, BB_FRAME_H - 10, BLACK)
+    d = L.deco
+    ring, inset = d["ring"], d["art_inset"]
+    c.rect(x, 0, L.BB_FRAME_W, L.BB_FRAME_H, GREY)
+    c.rect(x + ring, ring, L.BB_FRAME_W - 2 * ring, L.BB_FRAME_H - 2 * ring,
+           accent)
+    c.rect(x + inset, inset, L.BB_FRAME_W - 2 * inset,
+           L.BB_FRAME_H - 2 * inset, BLACK)
 
     # A single pole down the middle.  It runs off the bottom of the display, so
     # it gets no footing.
-    px = x + (BB_FRAME_W - BB_POLE_W) // 2
-    c.rect(px, BB_FRAME_H, BB_POLE_W, BB_H - BB_FRAME_H, DKGREY)
-    c.rect(px, BB_FRAME_H, 2, BB_H - BB_FRAME_H, GREY)
+    px = x + (L.BB_FRAME_W - L.BB_POLE_W) // 2
+    c.rect(px, L.BB_FRAME_H, L.BB_POLE_W, L.BB_H - L.BB_FRAME_H, DKGREY)
+    c.rect(px, L.BB_FRAME_H, d["pole_lit"], L.BB_H - L.BB_FRAME_H, GREY)
 
     # Spotlights hanging off the bottom rail.
-    for sx in (x + 14, x + BB_FRAME_W - 18):
-        c.rect(sx, BB_FRAME_H, 4, 3, DKGREY)
-        c.rect(sx, BB_FRAME_H + 3, 4, 1, AMBER)
+    for sx in (x + d["spot_left"], x + L.BB_FRAME_W - d["spot_right"]):
+        c.rect(sx, L.BB_FRAME_H, d["spot_w"], d["spot_h"], DKGREY)
+        c.rect(sx, L.BB_FRAME_H + d["spot_h"], d["spot_w"], d["spot_glow"],
+               AMBER)
 
 
 def gen_billboard():
-    # Keep the 320px logical repeat in the watchface, but do not store its
-    # 100px transparent margins on either side of the 120px artwork.
-    c = Canvas(BB_FRAME_W, BB_H)
+    # Keep the logical repeat in the watchface, but do not store the
+    # transparent margins on either side of the artwork.
+    c = Canvas(L.BB_FRAME_W, L.BB_H)
     _billboard(c, 0, BB_ACCENT)
-    write_png(os.path.join(OUT_DIR, "bb_0.png"), c)
+    write_png(art_path("bb_0"), c)
 
 
 # ============================================================ menu icon ====
 # The launcher tints the icon, so it is drawn in greys only: the shades read
 # as an alpha ramp rather than as colours.  At 25px the scene has to be pared
 # back to the two things that identify the watchface -- the billboard on its
-# pole, and a skyline behind it.
+# pole, and a skyline behind it.  It is the same on every platform, so it is
+# written untagged and shared.
 
 MENU_W = 25
 MENU_H = 25
@@ -481,13 +630,7 @@ def _blit(dst, src, y):
 
 def _store_sky(c, size, horizon):
     """The same sunset as the watchface, requantised to the icon's height."""
-    stops, last = [], -1
-    for row, colour in SKY_STOPS:
-        row = row * horizon // SKY_H
-        if row <= last:                 # two stops collapsing at small sizes
-            row = last + 1
-        stops.append((row, colour))
-        last = row
+    stops = scale_stops(SKY_STOPS, horizon)
     sky = Canvas(size, stops[-1][0] + 1)
     dither_gradient(sky, stops)
     _blit(c, sky, 0)
@@ -604,30 +747,36 @@ def gen_store_icon(size):
 
 
 # ================================================================= main ====
+def report():
+    """Prints each layer's colour count; over 16 breaks SmallestPalette."""
+    print("%s: sky, %d unique colours" %
+          (L.name, len(_read_colours(art_path("sky")))))
+    for prefix, count in (("bg", L.BG_TILES), ("fg", L.FG_TILES),
+                          ("bb", L.BB_TILES)):
+        colours = set()
+        for t in range(count):
+            colours |= _read_colours(art_path("%s_%d" % (prefix, t)))
+        print("%s: %s, %d tiles, %d unique colours%s" %
+              (L.name, prefix, count, len(colours),
+               "  *** TOO MANY FOR A PALETTE ***" if len(colours) > 16 else ""))
+
+
 def main():
     if not os.path.isdir(OUT_DIR):
         os.makedirs(OUT_DIR)
-    gen_sky()
-    gen_background()
-    gen_foreground()
-    gen_billboard()
+    for platform in PLATFORMS:
+        select(platform)
+        gen_sky()
+        gen_background()
+        gen_foreground()
+        gen_billboard()
+        report()
+
     gen_menu_icon()
     if not os.path.isdir(STORE_DIR):
         os.makedirs(STORE_DIR)
     for size in STORE_SIZES:
         gen_store_icon(size)
-
-    print("sky: 1 image, %d unique colours" %
-          len(_read_colours(os.path.join(OUT_DIR, "sky.png"))))
-    for prefix, count in (("bg", BG_TILES), ("fg", FG_TILES), ("bb", BB_TILES)):
-        colours = set()
-        for t in range(count):
-            path = os.path.join(OUT_DIR, "%s_%d.png" % (prefix, t))
-            tile = _read_colours(path)
-            colours |= tile
-        print("%s: %d tiles, %d unique colours%s" %
-              (prefix, count, len(colours),
-               "  *** TOO MANY FOR A PALETTE ***" if len(colours) > 16 else ""))
 
 
 def _read_colours(path):

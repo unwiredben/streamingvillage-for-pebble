@@ -13,6 +13,30 @@
   } \
 } while (0)
 
+// Like CHECK, but reports the numbers: the frame counts below move whenever
+// the geometry does, and the new value is what you need to see.
+#define CHECK_EQ(actual, expected) do { \
+  if ((actual) != (expected)) { \
+    fprintf(stderr, "line %d: %s == %d, expected %d\n", __LINE__, #actual, \
+            (int)(actual), (int)(expected)); \
+    exit(1); \
+  } \
+} while (0)
+
+// A run is BB_PASSES billboard passes of BB_TILE_W at BB_SPEED, plus a stall
+// of BB_PAUSE_MS on each.  Redraws are fewer than frames because the slow
+// layers move in fractions of a pixel, and because nothing is redrawn during
+// the stall.
+#if defined(PBL_PLATFORM_EMERY)
+  #define EXPECT_FRAMES 506
+  #define EXPECT_DIRTY 486
+#elif defined(PBL_PLATFORM_BASALT)
+  #define EXPECT_FRAMES 386
+  #define EXPECT_DIRTY 366
+#else
+  #error "No expected frame counts for this platform."
+#endif
+
 static int dirty_count;
 static int timer_count;
 static int visible_height = PBL_DISPLAY_HEIGHT;
@@ -25,7 +49,9 @@ GBitmap *gbitmap_create_with_resource(uint32_t id) {
   return (GBitmap *)&bitmap_token;
 }
 void gbitmap_destroy(GBitmap *bitmap) { CHECK(bitmap == (GBitmap *)&bitmap_token); }
-GRect gbitmap_get_bounds(const GBitmap *bitmap) { return GRect(0, 0, 120, 122); }
+GRect gbitmap_get_bounds(const GBitmap *bitmap) {
+  return GRect(0, 0, BB_FRAME_W, BB_H);
+}
 void graphics_draw_bitmap_in_rect(GContext *ctx, const GBitmap *bitmap, GRect rect) {
   bitmap_draws++;
   bitmap_rect = rect;
@@ -85,41 +111,44 @@ int main(int argc, char **argv) {
       frame_timer(NULL);
       frames++;
     }
-    CHECK(frames == 506);
+    CHECK_EQ(frames, EXPECT_FRAMES);
     CHECK(s_billboard.offset == SUBPIX(BB_REST_PX));
     CHECK(s_passes_left == 0);
-    CHECK(dirty_count == 486);
+    CHECK_EQ(dirty_count, EXPECT_DIRTY);
     int before = dirty_count;
     tick_handler(NULL, MINUTE_UNIT);
     CHECK(dirty_count == before + 1);
   } else if (strcmp(argv[1], "obstruction") == 0) {
     // Repeated callbacks at the same integer displacement need only one draw.
-    visible_height = 190;
+    visible_height = PBL_DISPLAY_HEIGHT - 38;
     unobstructed_change_handler(0, NULL);
     CHECK(dirty_count == 1);
     unobstructed_change_handler(1, NULL);
     CHECK(dirty_count == 1);
-    visible_height = 189;
+    visible_height = PBL_DISPLAY_HEIGHT - 39;
     unobstructed_change_handler(2, NULL);
     CHECK(dirty_count == 2);
-    visible_height = 228;
+    visible_height = PBL_DISPLAY_HEIGHT;
     unobstructed_change_handler(3, NULL);
     CHECK(dirty_count == 3);
   } else if (strcmp(argv[1], "billboard") == 0) {
     s_billboard.image_x = BB_FRAME_X;
     const int shifts[] = {0, -38, -80};
     for (unsigned i = 0; i < ARRAY_LENGTH(shifts); i++) {
-      for (int px = 0; px < 320; px++) {
+      for (int px = 0; px < BB_TILE_W; px++) {
         s_billboard.offset = SUBPIX(px);
         bitmap_draws = 0;
         CHECK(city_layer_draw(&s_billboard, NULL, shifts[i]) == -px);
-        // At 220 the old board has just left and the next is at x=200.
-        CHECK(bitmap_draws == (px == 220 ? 0 : 1));
+        // At BB_CLEAR_AT the old board has just left and the next one is
+        // exactly at the right edge, so neither is on screen.
+        CHECK(bitmap_draws == (px == BB_CLEAR_AT ? 0 : 1));
         if (bitmap_draws) {
-          CHECK(bitmap_rect.origin.x == (px < 220 ? 100 - px : 420 - px));
-          CHECK(bitmap_rect.origin.y == 134 + shifts[i]);
-          CHECK(bitmap_rect.size.w == 120);
-          CHECK(bitmap_rect.size.h == 122);
+          CHECK(bitmap_rect.origin.x == (px < BB_CLEAR_AT
+                                         ? BB_FRAME_X - px
+                                         : BB_FRAME_X + BB_TILE_W - px));
+          CHECK(bitmap_rect.origin.y == BB_Y + shifts[i]);
+          CHECK(bitmap_rect.size.w == BB_FRAME_W);
+          CHECK(bitmap_rect.size.h == BB_H);
         }
       }
     }

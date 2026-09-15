@@ -2,53 +2,86 @@
 
 #include "city_layer.h"
 
-#if !defined(PBL_PLATFORM_EMERY)
-#error "Streaming Village targets the Pebble Time 2 (emery) only."
-#endif
-
 // ---------------------------------------------------------------------------
-// Scene layout.  These values mirror the ones in tools/gen_art.py -- change
-// them there and here together, or the layers will stop lining up.
+// Scene layout.  Every length is derived from the emery reference (200x228) by
+// the same integer scaling tools/gen_art.py applies to the artwork, so the two
+// stay in step by construction instead of by remembering to edit both:
+//
+//                          emery      basalt
+//   SKY_H                     88          64
+//   BG_Y / BG_H          48 / 40     35 / 29
+//   FG_Y / FG_H         28 / 200    21 / 147
+//   BB_Y / BB_H        134 / 122     98 / 89
+//   BB_FRAME_X / _W    100 / 120     72 / 86
+//   BB_TILE_W                320         230
+//   BB_PANEL_X / _W    108 / 104     78 / 74
+//   BB_PANEL_Y / _H     12 /  44      8 / 32
+//
+// tests/test_billboard_art.py asserts the invariants both files rely on.
 // ---------------------------------------------------------------------------
-#define SKY_H 88                 // static dithered sunset, 200x88, opaque
+#define EMERY_W 200
+#define EMERY_H 228
 
-#define BG_Y 48                  // mountain ridge: 200x40, alpha
-#define BG_H 40
+// A horizontal / vertical length scaled from the emery reference.  Both are
+// the identity on emery.
+#define SCALE_X(v) ((v) * PBL_DISPLAY_WIDTH / EMERY_W)
+#define SCALE_Y(v) ((v) * PBL_DISPLAY_HEIGHT / EMERY_H)
+// Rounded up to even, so a centred inset stays symmetric.
+#define EVEN(v) (((v) + 1) & ~1)
+
+#define SKY_H SCALE_Y(88)        // static dithered sunset, full width, opaque
+
+#define BG_H SCALE_Y(40)         // mountain ridge, alpha, sitting on the sky
+#define BG_Y (SKY_H - BG_H)
 #define BG_TILES 6
 
-#define FG_Y 28                  // near buildings and street: 200x200, alpha
-#define FG_H 200
+#define FG_H SCALE_Y(200)        // near buildings and street, alpha
+#define FG_Y (PBL_DISPLAY_HEIGHT - FG_H)
 #define FG_TILES 8
 
-#define BB_Y 134                 // billboard: 120x122, repeating every 320px.
-                                 // The board sits just over the top of the road, on a pole
-                                 // that runs off the bottom of the display.
-#define BB_H 122
-#define BB_TILE_W 320
+// The billboard sits just over the top of the road, on a pole that runs off
+// the bottom of the display.
+#define BB_H SCALE_Y(122)
+#define BB_Y SCALE_Y(134)
 #define BB_TILES 1
-#define BB_FRAME_X 100           // billboard frame, relative to its tile
-#define BB_FRAME_W 120
+#define BB_FRAME_W EVEN(SCALE_X(120))
+#define BB_FRAME_H SCALE_Y(68)
 
-// The blank interior of the billboard panel, relative to its tile.
-#define BB_PANEL_X 108
-#define BB_PANEL_Y 12
-#define BB_PANEL_W 104
-#define BB_PANEL_H 44
-
-// A 320px tile is the display width plus the billboard width, so the instant
-// the board clears the left edge its repeat is exactly at the right edge.  We
+// A tile is the display width plus the billboard width, so the instant the
+// board clears the left edge its repeat is exactly at the right edge.  We
 // stall there to hold the empty skyline for a beat.
+#define BB_TILE_W (PBL_DISPLAY_WIDTH + BB_FRAME_W)
+#define BB_FRAME_X ((BB_TILE_W - BB_FRAME_W) / 2)
 #define BB_CLEAR_AT (BB_FRAME_X + BB_FRAME_W)
 #define BB_PAUSE_MS 2000
+
+// The panel margin and the clock face are the only two things that do not
+// scale: at 0.72x the digits have to come down a size, and the margin with
+// them.  LECO_32 would not clear a 32px panel whatever its width.
+#if defined(PBL_PLATFORM_EMERY)
+  #define BB_PANEL_INSET 8
+  #define CLOCK_FONT FONT_KEY_LECO_32_BOLD_NUMBERS
+#elif defined(PBL_PLATFORM_BASALT)
+  #define BB_PANEL_INSET 6
+  #define CLOCK_FONT FONT_KEY_LECO_26_BOLD_NUMBERS_AM_PM
+#else
+  #error "Streaming Village supports emery and basalt."
+#endif
+
+// The blank interior of the billboard panel, relative to its tile.
+#define BB_PANEL_X (BB_FRAME_X + BB_PANEL_INSET)
+#define BB_PANEL_W (BB_FRAME_W - 2 * BB_PANEL_INSET)
+#define BB_PANEL_Y (12 * BB_FRAME_H / 68)
+#define BB_PANEL_H (44 * BB_FRAME_H / 68)
 
 // Scroll offset that leaves the billboard centred on the display.  The
 // animation starts and comes to rest here, so a run is a whole number of
 // billboard passes.
 #define BB_REST_PX (BB_FRAME_X - (PBL_DISPLAY_WIDTH - BB_FRAME_W) / 2)
 
-// How many times the billboard crosses the display per run.  A pass is 320px
-// at 1.5px per frame plus the two-second stall, so two of them is a little
-// over 25 seconds.
+// How many times the billboard crosses the display per run.  A pass is one
+// tile at 1.5px per frame plus the two-second stall: a little over 12 seconds
+// on emery, a little over 9 on basalt.
 #define BB_PASSES 2
 
 // Parallax speeds in subpixels per frame.  At FRAME_MS these work out to
@@ -107,7 +140,7 @@ static void update_time_text(void) {
 // brought on screen.  Both drawn tiles get the text; the graphics context
 // clips whichever panel is off the edge, and during the stall both are.
 static void draw_billboard_time(GContext *ctx, int tile_origin, int dy) {
-  GFont font = fonts_get_system_font(FONT_KEY_LECO_32_BOLD_NUMBERS);
+  GFont font = fonts_get_system_font(CLOCK_FONT);
 
   graphics_context_set_text_color(ctx, GColorWhite);
   for (int i = 0; i < 2; i++) {

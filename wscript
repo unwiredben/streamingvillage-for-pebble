@@ -1,7 +1,3 @@
-#
-# Build rules for the Streaming Villa watchface (Pebble Time 2 / emery only).
-#
-
 top = '.'
 out = 'build'
 

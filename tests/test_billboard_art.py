@@ -1,4 +1,4 @@
-"""Check that billboard cropping preserves the original artwork exactly."""
+"""Check the generated artwork against the geometry the watchface assumes."""
 import importlib.util
 from pathlib import Path
 import struct
@@ -34,26 +34,76 @@ def read_png(path):
     return width, height, rows
 
 
+class LayoutInvariantTest(unittest.TestCase):
+    """The relationships src/c/main.c derives its own #defines from.
+
+    A mismatch here means the artwork and the watchface have drifted apart,
+    which otherwise only shows up as a seam on the watch.
+    """
+
+    def test_invariants_hold_on_every_platform(self):
+        for name, L in art.PLATFORMS.items():
+            with self.subTest(platform=name):
+                # The sky's bottom edge is where the ridge sits.
+                self.assertEqual(L.BG_Y + L.BG_H, L.SKY_H)
+                # The foreground's street lands on the bottom of the display.
+                self.assertEqual(L.FG_Y + L.FG_H, L.SCREEN_H)
+                # A tile is the display plus one board, so the board clears the
+                # left edge exactly as its repeat reaches the right one.
+                self.assertEqual(L.BB_TILE_W, L.SCREEN_W + L.BB_FRAME_W)
+                # Which leaves the artwork centred in its tile.
+                self.assertEqual(L.BB_FRAME_X, L.SCREEN_W // 2)
+                # The pole runs off the bottom rather than getting a footing.
+                self.assertGreater(L.BB_Y + L.BB_H, L.SCREEN_H)
+                # Panoramas are a whole number of tiles.
+                self.assertEqual(L.BG_W, L.SCREEN_W * L.BG_TILES)
+                self.assertEqual(L.FG_W, L.SCREEN_W * L.FG_TILES)
+                # No tile is narrower than the display, or the viewport could
+                # straddle three of them and city_layer's two slots would not
+                # be enough.
+                for tile_w in (L.SCREEN_W, L.BB_TILE_W):
+                    self.assertGreaterEqual(tile_w, L.SCREEN_W)
+
+    def test_emery_matches_the_authored_reference(self):
+        """The scaling has to be the identity at the size it was authored at."""
+        L = art.PLATFORMS["emery"]
+        self.assertEqual((L.SCREEN_W, L.SCREEN_H), (art.EMERY_W, art.EMERY_H))
+        self.assertEqual(L.SKY_H, 88)
+        self.assertEqual((L.BG_Y, L.BG_H), (48, 40))
+        self.assertEqual((L.FG_Y, L.FG_H), (28, 200))
+        self.assertEqual((L.BB_Y, L.BB_H), (134, 122))
+        self.assertEqual((L.BB_FRAME_X, L.BB_FRAME_W), (100, 120))
+        self.assertEqual(L.BB_TILE_W, 320)
+
+
 class BillboardArtTest(unittest.TestCase):
     def test_cropped_resource_preserves_original_pixels(self):
-        # Reconstruct the original 320-wide artwork independently of gen_billboard.
-        original = art.Canvas(320, 122)
-        art._billboard(original, 100, art.BB_ACCENT)
-        with tempfile.TemporaryDirectory() as directory:
-            old_output = art.OUT_DIR
-            try:
-                art.OUT_DIR = directory
-                art.gen_billboard()
-            finally:
-                art.OUT_DIR = old_output
-            width, height, rows = read_png(Path(directory) / "bb_0.png")
-        self.assertEqual((width, height), (120, 122))
-        for y, row in enumerate(rows):
-            self.assertEqual([art.CLEAR] * 100 + row + [art.CLEAR] * 100,
-                             original.px[y])
-        # The checked-in bitmap must match the generator too.
-        self.assertEqual(read_png(ROOT / "resources/images/bb_0.png"),
-                         (width, height, rows))
+        for platform in art.PLATFORMS:
+            with self.subTest(platform=platform):
+                L = art.select(platform)
+                # Reconstruct the original full-tile artwork independently of
+                # gen_billboard, then check the crop threw away only margin.
+                original = art.Canvas(L.BB_TILE_W, L.BB_H)
+                art._billboard(original, L.BB_FRAME_X, art.BB_ACCENT)
+
+                with tempfile.TemporaryDirectory() as directory:
+                    old_output = art.OUT_DIR
+                    try:
+                        art.OUT_DIR = directory
+                        art.gen_billboard()
+                    finally:
+                        art.OUT_DIR = old_output
+                    name = "bb_0~%s.png" % platform
+                    width, height, rows = read_png(Path(directory) / name)
+
+                self.assertEqual((width, height), (L.BB_FRAME_W, L.BB_H))
+                margin = [art.CLEAR] * L.BB_FRAME_X
+                for y, row in enumerate(rows):
+                    self.assertEqual(margin + row + margin, original.px[y])
+                # The checked-in bitmap must match the generator too.
+                self.assertEqual(
+                    read_png(ROOT / "resources/images" / name),
+                    (width, height, rows))
 
 
 if __name__ == "__main__":

@@ -2,9 +2,9 @@
 
 #include <pebble.h>
 
-// A layer's tiles are never narrower than the display, so the 200px viewport
-// always overlaps at most two adjacent logical tiles.  That lets a layer keep
-// just two bitmaps resident no matter how long its panorama is.
+// A layer's tiles are never narrower than the display, so the viewport always
+// overlaps at most two adjacent logical tiles.  That lets a layer keep just
+// two bitmaps resident no matter how long its panorama is.
 #define MIN_TILE_W PBL_DISPLAY_WIDTH
 
 // Scroll offsets are tracked in 1/16ths of a pixel so the slow layers can
