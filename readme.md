@@ -6,27 +6,56 @@ speeds, and the time rides past on a billboard.
 ![billboard](screenshots/billboard.png)
 ![skyline](screenshots/skyline.png)
 ![the same scene on a Pebble Time](screenshots/basalt-billboard.png)
+![skyline on a Pebble Time](screenshots/basalt-skyline.png)
 
-The first two are a Pebble Time 2; the third is the same scene on a Pebble
+The first two are a Pebble Time 2; the last two are the same scene on a Pebble
 Time.
 
-Built for the **Pebble Time 2** (emery, 200x228) and the **Pebble Time /
-Time Steel** (basalt, 144x168) — both 64-colour displays, so the two share a
-palette and differ only in scale. `main.c` has a `#error` guard so it can't be
-built for a platform it has no layout for.
+![billboard on a Pebble Round 2](screenshots/gabbro-billboard.png)
+![skyline on a Pebble Round 2](screenshots/gabbro-skyline.png)
+![billboard on a Pebble Time Round](screenshots/chalk-billboard.png)
+![skyline on a Pebble Time Round](screenshots/chalk-skyline.png)
+
+And the two round watches — a Pebble Round 2 and a Pebble Time Round — where
+the display crops the corners off every band.
+
+Built for four platforms, all 64-colour displays, so they share a palette and
+differ only in scale:
+
+| platform | watch | display |
+|---|---|---|
+| emery | Pebble Time 2 | 200x228 |
+| basalt | Pebble Time / Time Steel | 144x168 |
+| chalk | Pebble Time Round | 180x180, round |
+| gabbro | Pebble Round 2 | 260x260, round |
+
+`main.c` has a `#error` guard so it can't be built for a platform it has no
+layout for.
 
 ## The layers
 
-| layer | emery | basalt | tiles | speed | contents |
-|---|---|---|---|---|---|
-| sky | 200x88 at y=0 | 144x64 at y=0 | 1 | static | the dithered sunset gradient, opaque |
-| background | 200x40 at y=48 | 144x29 at y=35 | 6 | ~3.75 px/s | mountain ridge with a rim-lit crest |
-| foreground | 200x200 at y=28 | 144x147 at y=21 | 8 | ~15 px/s | near towers with lit windows, street lamps, road |
-| billboard | 120x122 at y=134, 320px repeat | 86x89 at y=98, 230px repeat | 1 | ~30 px/s | the billboard that carries the time |
+| layer | tiles | speed | contents |
+|---|---|---|---|
+| sky | 1 | static | the dithered sunset gradient, opaque |
+| background | 6 | ~3.75 px/s | mountain ridge with a rim-lit crest |
+| foreground | 8, or 6 on gabbro | ~15 px/s | near towers with lit windows, street lamps, road |
+| billboard | 1 | ~30 px/s | the billboard that carries the time |
 
-Both platforms scroll at the same physical speed and use the same tile counts;
-only the panorama width changes (the foreground loop is 1600px on emery and
-1152px on basalt). See [Two sizes, one layout](#two-sizes-one-layout).
+And where each one sits:
+
+| layer | emery | basalt | chalk | gabbro |
+|---|---|---|---|---|
+| sky | 200x88 at y=0 | 144x64 at y=0 | 180x69 at y=0 | 260x100 at y=0 |
+| background | 200x40 at y=48 | 144x29 at y=35 | 180x31 at y=38 | 260x45 at y=55 |
+| foreground | 200x200 at y=28 | 144x147 at y=21 | 180x157 at y=23 | 260x228 at y=32 |
+| billboard | 120x122 at y=134 | 86x89 at y=98 | 108x96 at y=105 | 156x139 at y=152 |
+| billboard repeat | 320px | 230px | 288px | 416px |
+| foreground loop | 1600px | 1152px | 1440px | 1560px |
+
+Every platform scrolls at the same physical speed; what changes is the
+panorama width. gabbro is the one platform that does not use eight foreground
+tiles — see [Memory](#memory). See also
+[Four sizes, one layout](#four-sizes-one-layout).
 
 The background is a shallow band and the towers are tall, so the sunset reads
 as a thin strip above the horizon rather than half the display. Most towers
@@ -93,8 +122,8 @@ the centred offset and always starts from it, so a pass is a well-defined unit:
 `frame_timer` watches for the step that would carry the billboard back to that
 offset, lands exactly on it — which also keeps every pass the same length —
 and stops when the last one is done. Two passes work out at a little over 25
-seconds on emery and a little under 20 on basalt, but nothing depends on those
-numbers.
+seconds on emery, a little under 20 on basalt, a little over 23 on chalk and
+a little under 32 on gabbro, but nothing depends on those numbers.
 
 `start_animation` is idempotent, and has to be: activation fires both
 `.appear` and `did_focus`, about a second apart. It sets the pass count rather
@@ -105,14 +134,17 @@ run.
 Taps while unfocused cannot restart the animation. Each timer step still
 advances all three scroll positions, but requests a redraw only if an integer
 pixel position changes (or the run ends). An uninterrupted run takes 506 steps
-and requests 486 animation redraws on emery, 386 and 366 on basalt; in both
-cases the remaining 20 steps change only fractional positions during the
-billboard pauses. `tests/power_savings.c` pins those counts.
+and requests 486 animation redraws on emery, 386 and 366 on basalt, 462 and
+442 on chalk, 634 and 614 on gabbro; in every case the remaining 20 steps
+change only fractional
+positions during the billboard pauses. `tests/power_savings.c` pins those
+counts.
 
 ### The billboard gap
 
 The billboard tile is one display width plus one billboard wide — 320 = 200 +
-120 on emery, 230 = 144 + 86 on basalt. That makes the board clear the left
+120 on emery, 230 = 144 + 86 on basalt, 288 = 180 + 108 on chalk,
+416 = 260 + 156 on gabbro. That makes the board clear the left
 edge at the exact moment its repeat reaches the right edge, leaving no natural
 gap — so
 `city_layer_set_pause` stalls the layer at that offset for two seconds. The
@@ -142,22 +174,25 @@ each palettised at the narrowest bit depth its colour count allows. Rows are
 byte-aligned, so a 4-bit tile costs `ceil(w/2)` bytes per row and a 2-bit one
 `ceil(w/4)`:
 
-    emery                                basalt
-    sky         1 x  8,800 =  8,800      1 x  4,608 =  4,608   (4-bit, 9 colours)
-    background  2 x  2,000 =  4,000      2 x  1,044 =  2,088   (2-bit, 3 colours)
-    foreground  2 x 20,000 = 40,000      2 x 10,584 = 21,168   (4-bit, 9 colours)
-    billboard   1 x  7,320 =  7,320      1 x  3,827 =  3,827   (4-bit, 6 colours)
-                           --------                 --------
-                             60,120                   31,691
+                emery       basalt       chalk      gabbro
+    sky         1 x  8,800  1 x  4,608  1 x  6,210  1 x 13,000  (4-bit, 9 colours)
+    background  2 x  2,000  2 x  1,044  2 x  1,395  2 x  2,925  (2-bit, 3 colours)
+    foreground  2 x 20,000  2 x 10,584  2 x 14,130  2 x 29,640  (4-bit, 9 colours)
+    billboard   1 x  7,320  1 x  3,827  1 x  5,184  1 x 10,842  (4-bit, 6 colours)
+                  --------    --------    --------    --------
+                    60,120      31,691      42,444      88,972
 
-    of emery's 128KB                     of basalt's 64KB
+                of 128KB     of 64KB     of 64KB     of 128KB
 
-Basalt is the tighter of the two and still has room: the firmware reports a
-32,384-byte peak against a 62,400-byte heap, the difference from the table
-being the `GBitmap` structs themselves. Halving the display width is close to
-halving the bitmap cost, which is why the artwork is regenerated at 144px
-rather than reused — two 200x200 foreground tiles alone would be 40KB of
-basalt's 64KB.
+Chalk is the tightest: it has basalt's 64KB heap but a display half again as
+large in area, which leaves about 13KB clear once the tiles are resident.
+Basalt has the most room of the four — the firmware reports a 32,384-byte peak
+against a 62,400-byte heap, the difference from the table being the `GBitmap`
+structs themselves. Halving the display width is close to halving
+the bitmap cost, which is why the artwork is regenerated per platform rather
+than reused — two 200x200 foreground tiles alone would be 40KB of basalt's
+64KB, and a 200px tile on gabbro's 260px display would let the viewport
+straddle three logical tiles, which the two-slot cache cannot serve.
 
 Every layer's artwork stays at or under 16 unique colours, which is what lets
 the resources be declared `SmallestPalette` — the SDK then picks the narrowest
@@ -168,10 +203,23 @@ bits. The build fails loudly if a layer ever exceeds 16, and
 Resources are stored as `pbi` rather than `png`. PNG resources would be much
 smaller on flash — the dithered sky especially — but decoding one needs a
 transient buffer on top of everything already resident, and the tiles are
-loaded mid-animation. Uncompressed, the packs come to 192,751 bytes on emery
-and 104,002 on basalt, each against a 256KB per-platform limit.
+loaded mid-animation. Uncompressed, the packs come to 192,751 bytes on emery,
+104,002 on basalt, 137,435 on chalk and 223,807 on gabbro, each against a
+256KB per-platform limit.
 
-## Two sizes, one layout
+That limit is what sets gabbro's foreground panorama at six tiles rather than
+eight. A 260x228 tile costs 29,640 bytes, so eight of them would be 237KB of
+the 256KB budget on their own and the pack would come to roughly 283KB —
+buildable and sideloadable, since the hard limit is 1024KB, but over the
+ceiling the appstore enforces. Six tiles is a 1560px loop, about 104 seconds
+at 15 px/s, and nothing on the watch notices: `city_layer` reads its tile
+count from the array it is handed. `package.json` keeps `IMG_FG_6` and
+`IMG_FG_7` off gabbro with a per-resource `targetPlatforms`, so those two
+bitmaps are not in its pack at all, and `main.c` sizes `s_fg_ids` to match.
+`tests/test_billboard_art.py` asserts every platform's pack stays inside the
+budget.
+
+## Four sizes, one layout
 
 Nothing in `src/c/city_layer.c` knows a display size: it culls against
 `PBL_DISPLAY_WIDTH` and `MIN_TILE_W` is that same width. The scene geometry
@@ -190,24 +238,41 @@ the display, a billboard tile being one display plus one board — are asserted
 in `tests/test_billboard_art.py`, so a drift between generator and watchface
 fails a test rather than showing up as a seam on the watch.
 
-Only two values genuinely differ per platform: the billboard's panel margin,
-and the clock face. `FONT_KEY_LECO_32_BOLD_NUMBERS` will not clear basalt's
-32px panel whatever its width, so basalt uses
-`FONT_KEY_LECO_26_BOLD_NUMBERS_AM_PM`.
+Only three values genuinely differ per platform: the billboard's panel margin,
+the clock face, and — on gabbro alone — the foreground tile count. The system
+fonts come in fixed sizes, so the digits step to the nearest one that clears
+the panel: `FONT_KEY_LECO_32_BOLD_NUMBERS` will not fit basalt's 32px panel or
+chalk's 34px one whatever its width, so both use
+`FONT_KEY_LECO_26_BOLD_NUMBERS_AM_PM`, and gabbro's 49px panel goes the other
+way to `FONT_KEY_LECO_36_BOLD_NUMBERS`.
+
+### The round ones
+
+chalk and gabbro are round, and nothing in the code accounts for that. There
+are no `PBL_ROUND` branches: the bands stay full width and the display simply
+crops the corners off them. That is the right answer here rather than a
+shortcut — the scene is horizontal by construction, so what the circle takes
+is sky at the top corners, the far ends of the ridge, and kerb at the bottom
+corners, none of which carry information. The one thing that has to stay
+inside the circle is the clock panel, and it clears the inscribed circle at
+every corner with room to spare on both: x 43..137 / y 114..148 on chalk,
+x 62..198 / y 165..214 on gabbro.
 
 ### Per-platform resources
 
-The two artwork sets share one set of resource names. `package.json` declares
+The four artwork sets share one set of resource names. `package.json` declares
 the bare `images/fg_0.png`, and the SDK's `find_most_specific_filename`
-resolves it to `fg_0~emery.png` or `fg_0~basalt.png` from the platform's tags
-— so there is one media entry per image, one `RESOURCE_ID_IMG_FG_0`, and one
-id array in `main.c`. `menu_icon.png` is identical on both and stays untagged.
+resolves it to `fg_0~emery.png`, `fg_0~basalt.png`, `fg_0~chalk.png` or
+`fg_0~gabbro.png` from the platform's tags — so there is one media entry per
+image, one `RESOURCE_ID_IMG_FG_0`, and one id array in `main.c`.
+`menu_icon.png` is identical on all four and stays untagged.
 
 ## Artwork
 
-There are no hand-drawn assets. `tools/gen_art.py` generates the sky and all
-15 scrolling tiles procedurally, for every platform, in one pass (pure Python
-— it writes the PNGs itself, so no Pillow needed):
+There are no hand-drawn assets. `tools/gen_art.py` generates the sky and every
+scrolling tile procedurally — 15 per platform, 13 on gabbro — for all four
+platforms in one pass (pure Python — it writes the PNGs itself, so no Pillow
+needed):
 
     python3 tools/gen_art.py
 
@@ -217,18 +282,23 @@ grid.
 
 Geometry lives in a `Layout` per platform, scaled from the emery reference the
 same way `main.c` scales its `#define`s. Decorative detail is *not* scaled and
-is listed per platform in `EMERY_DECO` / `BASALT_DECO`: at 0.72x a window grid
-turns to mush and a rim light disappears, so window pitch, lamp spacing, dash
+is listed per platform in `EMERY_DECO` / `BASALT_DECO` / `CHALK_DECO` /
+`GABBRO_DECO`: at 0.72x a window grid turns to mush and a rim light
+disappears, and at 1.3x it looks sparse, so window pitch, lamp spacing, dash
 length and the like are chosen rather than computed. Because the scaling is
 the identity at 200x228, regenerating has to leave the emery PNGs
 byte-identical — that is the regression check for any change in this file.
 
 ## Build
 
-    pebble build                         # builds emery and basalt
+    pebble build                         # builds all four platforms
     pebble install --emulator emery      # emulator
     pebble install --emulator basalt
+    pebble install --emulator chalk
+    pebble install --emulator gabbro
     pebble install --cloudpebble         # a real watch, via the phone
+
+gabbro needs a recent SDK: it first appears in 4.33.1.
 
 After changing `targetPlatforms`, run `pebble clean` first: waf caches the
 configured platform set and will otherwise keep building the old one.
@@ -248,4 +318,5 @@ stubs. They cover focus loss and taps, animation completion and redraw counts,
 minute updates, obstruction movement, and billboard placement across every
 scroll position in a tile with several notification offsets. The artwork check
 compares each platform's cropped resource with the original full-width
-procedural artwork, and asserts the layout invariants `main.c` derives from.
+procedural artwork, asserts the layout invariants `main.c` derives from, and
+sizes each platform's resource pack against the 256KB appstore ceiling.

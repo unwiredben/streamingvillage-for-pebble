@@ -33,6 +33,12 @@
 #elif defined(PBL_PLATFORM_BASALT)
   #define EXPECT_FRAMES 386
   #define EXPECT_DIRTY 366
+#elif defined(PBL_PLATFORM_CHALK)
+  #define EXPECT_FRAMES 462
+  #define EXPECT_DIRTY 442
+#elif defined(PBL_PLATFORM_GABBRO)
+  #define EXPECT_FRAMES 634
+  #define EXPECT_DIRTY 614
 #else
   #error "No expected frame counts for this platform."
 #endif
@@ -107,7 +113,7 @@ int main(int argc, char **argv) {
   } else if (strcmp(argv[1], "frames") == 0) {
     window_appear(NULL);
     int frames = 0;
-    while (s_timer && frames < 600) {
+    while (s_timer && frames < 2000) {
       frame_timer(NULL);
       frames++;
     }

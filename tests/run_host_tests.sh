@@ -15,7 +15,7 @@ trap 'rm -f "$test_binary"' EXIT
 
 platforms=("$@")
 if [[ ${#platforms[@]} -eq 0 ]]; then
-  platforms=(emery basalt)
+  platforms=(emery basalt chalk gabbro)
 fi
 
 result=0
@@ -23,6 +23,8 @@ for platform in "${platforms[@]}"; do
   case "$platform" in
     emery)  defines="-DPBL_PLATFORM_EMERY -DPBL_DISPLAY_WIDTH=200 -DPBL_DISPLAY_HEIGHT=228" ;;
     basalt) defines="-DPBL_PLATFORM_BASALT -DPBL_DISPLAY_WIDTH=144 -DPBL_DISPLAY_HEIGHT=168" ;;
+    chalk)  defines="-DPBL_PLATFORM_CHALK -DPBL_DISPLAY_WIDTH=180 -DPBL_DISPLAY_HEIGHT=180" ;;
+    gabbro) defines="-DPBL_PLATFORM_GABBRO -DPBL_DISPLAY_WIDTH=260 -DPBL_DISPLAY_HEIGHT=260" ;;
     *) echo "unknown platform: $platform" >&2; exit 2 ;;
   esac
 

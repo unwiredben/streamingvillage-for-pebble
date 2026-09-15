@@ -1,7 +1,7 @@
 {
   "name": "Streaming Village",
   "author": "Ben Combee <combee@techwood.org>",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "keywords": [
     "pebble-app"
   ],
@@ -13,7 +13,9 @@
     "sdkVersion": "3",
     "targetPlatforms": [
       "basalt",
-      "emery"
+      "chalk",
+      "emery",
+      "gabbro"
     ],
     "watchapp": {
       "watchface": true
@@ -115,6 +117,11 @@
           "type": "bitmap",
           "name": "IMG_FG_6",
           "file": "images/fg_6.png",
+          "targetPlatforms": [
+            "basalt",
+            "chalk",
+            "emery"
+          ],
           "memoryFormat": "SmallestPalette",
           "storageFormat": "pbi"
         },
@@ -122,6 +129,11 @@
           "type": "bitmap",
           "name": "IMG_FG_7",
           "file": "images/fg_7.png",
+          "targetPlatforms": [
+            "basalt",
+            "chalk",
+            "emery"
+          ],
           "memoryFormat": "SmallestPalette",
           "storageFormat": "pbi"
         },

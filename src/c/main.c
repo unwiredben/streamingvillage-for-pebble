@@ -7,15 +7,20 @@
 // the same integer scaling tools/gen_art.py applies to the artwork, so the two
 // stay in step by construction instead of by remembering to edit both:
 //
-//                          emery      basalt
-//   SKY_H                     88          64
-//   BG_Y / BG_H          48 / 40     35 / 29
-//   FG_Y / FG_H         28 / 200    21 / 147
-//   BB_Y / BB_H        134 / 122     98 / 89
-//   BB_FRAME_X / _W    100 / 120     72 / 86
-//   BB_TILE_W                320         230
-//   BB_PANEL_X / _W    108 / 104     78 / 74
-//   BB_PANEL_Y / _H     12 /  44      8 / 32
+//                       emery     basalt      chalk     gabbro
+//   SKY_H                    88         64         69        100
+//   BG_Y / BG_H         48 / 40    35 / 29    38 / 31    55 / 45
+//   FG_Y / FG_H        28 / 200   21 / 147   23 / 157   32 / 228
+//   BB_Y / BB_H       134 / 122    98 / 89   105 / 96  152 / 139
+//   BB_FRAME_X / _W   100 / 120    72 / 86   90 / 108  130 / 156
+//   BB_TILE_W               320        230        288        416
+//   BB_PANEL_X / _W   108 / 104    78 / 74    97 / 94  140 / 136
+//   BB_PANEL_Y / _H    12 /  44     8 / 32     9 / 34    13 /  49
+//
+// chalk and gabbro are round, and nothing here accounts for that: the bands
+// stay full width and the display crops the corners off them.  The one thing
+// that has to stay inside the circle is the clock panel, and it does on both
+// -- x 43..137 / y 114..148 on chalk, x 62..198 / y 165..214 on gabbro.
 //
 // tests/test_billboard_art.py asserts the invariants both files rely on.
 // ---------------------------------------------------------------------------
@@ -37,7 +42,14 @@
 
 #define FG_H SCALE_Y(200)        // near buildings and street, alpha
 #define FG_Y (PBL_DISPLAY_HEIGHT - FG_H)
-#define FG_TILES 8
+// Six tiles rather than eight on gabbro: a 260x228 tile is 29,640 bytes, so
+// the eight-tile panorama alone would be 237KB of a 256KB resource pack.
+// package.json keeps IMG_FG_6 and IMG_FG_7 off that platform to match.
+#if defined(PBL_PLATFORM_GABBRO)
+  #define FG_TILES 6
+#else
+  #define FG_TILES 8
+#endif
 
 // The billboard sits just over the top of the road, on a pole that runs off
 // the bottom of the display.
@@ -56,16 +68,23 @@
 #define BB_PAUSE_MS 2000
 
 // The panel margin and the clock face are the only two things that do not
-// scale: at 0.72x the digits have to come down a size, and the margin with
-// them.  LECO_32 would not clear a 32px panel whatever its width.
+// scale: the system fonts come in fixed sizes, so the digits step down or up
+// to the nearest one and the margin goes with them.  LECO_32 would not clear
+// basalt's 32px panel whatever its width, and would swim in gabbro's 49px one.
 #if defined(PBL_PLATFORM_EMERY)
   #define BB_PANEL_INSET 8
   #define CLOCK_FONT FONT_KEY_LECO_32_BOLD_NUMBERS
 #elif defined(PBL_PLATFORM_BASALT)
   #define BB_PANEL_INSET 6
   #define CLOCK_FONT FONT_KEY_LECO_26_BOLD_NUMBERS_AM_PM
+#elif defined(PBL_PLATFORM_CHALK)
+  #define BB_PANEL_INSET 7
+  #define CLOCK_FONT FONT_KEY_LECO_26_BOLD_NUMBERS_AM_PM
+#elif defined(PBL_PLATFORM_GABBRO)
+  #define BB_PANEL_INSET 10
+  #define CLOCK_FONT FONT_KEY_LECO_36_BOLD_NUMBERS
 #else
-  #error "Streaming Village supports emery and basalt."
+  #error "Streaming Village supports emery, basalt, chalk and gabbro."
 #endif
 
 // The blank interior of the billboard panel, relative to its tile.
@@ -120,7 +139,9 @@ static const uint32_t s_bg_ids[BG_TILES] = {
 static const uint32_t s_fg_ids[FG_TILES] = {
   RESOURCE_ID_IMG_FG_0, RESOURCE_ID_IMG_FG_1, RESOURCE_ID_IMG_FG_2,
   RESOURCE_ID_IMG_FG_3, RESOURCE_ID_IMG_FG_4, RESOURCE_ID_IMG_FG_5,
+#if FG_TILES == 8
   RESOURCE_ID_IMG_FG_6, RESOURCE_ID_IMG_FG_7,
+#endif
 };
 
 static const uint32_t s_bb_ids[BB_TILES] = {

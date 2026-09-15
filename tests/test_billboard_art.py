@@ -76,6 +76,46 @@ class LayoutInvariantTest(unittest.TestCase):
         self.assertEqual(L.BB_TILE_W, 320)
 
 
+# Every platform the watchface targets has the same 256KB appstore ceiling on
+# its resource pack (MAX_RESOURCES_SIZE_APPSTORE in the SDK's
+# pebble_sdk_platform.py).  Exceeding it still builds and sideloads -- the hard
+# limit is 1024KB -- so nothing else catches it until the store rejects the pbw.
+APPSTORE_RESOURCE_LIMIT = 256 * 1024
+
+
+def palettised_size(path):
+    """Bytes the SDK's `SmallestPalette` pbi costs for one image.
+
+    The narrowest bit depth the colour count allows, with byte-aligned rows --
+    the same arithmetic readme.md's memory table uses.
+    """
+    width, height, rows = read_png(path)
+    colours = len({px for row in rows for px in row})
+    assert colours <= 16, "%s has %d colours, too many to palettise" % (
+        path.name, colours)
+    bits = 1 if colours <= 2 else 2 if colours <= 4 else 4
+    return (width * bits + 7) // 8 * height
+
+
+class ResourceBudgetTest(unittest.TestCase):
+    def test_pack_fits_the_appstore_limit(self):
+        """gabbro carries six foreground tiles because eight would not fit."""
+        for name, L in art.PLATFORMS.items():
+            with self.subTest(platform=name):
+                images = ROOT / "resources/images"
+                total = palettised_size(images / ("sky~%s.png" % name))
+                total += palettised_size(images / ("bb_0~%s.png" % name))
+                for i in range(L.BG_TILES):
+                    total += palettised_size(
+                        images / ("bg_%d~%s.png" % (i, name)))
+                for i in range(L.FG_TILES):
+                    total += palettised_size(
+                        images / ("fg_%d~%s.png" % (i, name)))
+                # Pbi headers and palettes add a couple of percent on top of
+                # the pixel data, so leave the tail of the budget alone.
+                self.assertLess(total, APPSTORE_RESOURCE_LIMIT * 95 // 100)
+
+
 class BillboardArtTest(unittest.TestCase):
     def test_cropped_resource_preserves_original_pixels(self):
         for platform in art.PLATFORMS:

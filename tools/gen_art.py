@@ -81,7 +81,7 @@ def _even(value):
 
 
 class Layout(object):
-    def __init__(self, name, screen_w, screen_h, deco):
+    def __init__(self, name, screen_w, screen_h, deco, fg_tiles=8):
         self.name = name
         self.SCREEN_W = screen_w
         self.SCREEN_H = screen_h
@@ -109,7 +109,7 @@ class Layout(object):
         self.BG_PEAK_HALF_MAX = x(62)
 
         # -- foreground: towers and street, bottom-aligned on the screen --
-        self.FG_TILES = 8
+        self.FG_TILES = fg_tiles
         self.FG_W = screen_w * self.FG_TILES
         self.FG_H = y(200)
         self.FG_Y = screen_h - self.FG_H
@@ -184,9 +184,54 @@ BASALT_DECO = {
     "glow_dx": 1, "glow_w": 4, "glow_h": 2,
 }
 
+CHALK_DECO = {
+    "panel_inset": 7,
+    "ring": 2, "art_inset": 5, "pole_lit": 2,
+    "spot_left": 13, "spot_right": 16,
+    "spot_w": 4, "spot_h": 2, "spot_glow": 1,
+    "tower_w": (22, 49),
+    "win_top": 4, "win_bottom": 6, "win_step": 8,
+    "win_left": 4, "win_right": 5, "win_pitch": 7,
+    "win_w": 3, "win_h": 4,
+    "mast_rise": (5, 14), "mast_h": 14, "mast_tip": 15,
+    "box_min": 5, "box_h": 5, "box_cap": 2,
+    "neon_min_w": 27, "neon_inset": 7, "neon_drop": (6, 19),
+    "neon_w": 4, "neon_h": 21,
+    "kerb_h": 6, "kerb_line": 4, "kerb_line_h": 2,
+    "dash_step": 22, "dash_w": 11, "dash_h": 2,
+    "lamp_start": 18, "lamp_step": 90, "lamp_h": 27,
+    "arm_dx": 3, "arm_w": 7, "arm_h": 2,
+    "glow_dx": 2, "glow_w": 5, "glow_h": 2,
+}
+
+GABBRO_DECO = {
+    "panel_inset": 10,
+    "ring": 3, "art_inset": 6, "pole_lit": 3,
+    "spot_left": 18, "spot_right": 23,
+    "spot_w": 5, "spot_h": 3, "spot_glow": 1,
+    "tower_w": (31, 70),
+    "win_top": 6, "win_bottom": 9, "win_step": 11,
+    "win_left": 5, "win_right": 8, "win_pitch": 10,
+    "win_w": 4, "win_h": 6,
+    "mast_rise": (7, 21), "mast_h": 21, "mast_tip": 22,
+    "box_min": 8, "box_h": 7, "box_cap": 2,
+    "neon_min_w": 39, "neon_inset": 10, "neon_drop": (9, 27),
+    "neon_w": 5, "neon_h": 30,
+    "kerb_h": 8, "kerb_line": 6, "kerb_line_h": 2,
+    "dash_step": 31, "dash_w": 16, "dash_h": 3,
+    "lamp_start": 26, "lamp_step": 130, "lamp_h": 39,
+    "arm_dx": 4, "arm_w": 10, "arm_h": 3,
+    "glow_dx": 3, "glow_w": 8, "glow_h": 2,
+}
+
 PLATFORMS = {
     "emery": Layout("emery", 200, 228, EMERY_DECO),
     "basalt": Layout("basalt", 144, 168, BASALT_DECO),
+    # gabbro is round, and the scene is simply clipped by the circle -- see
+    # readme.md.  Six foreground tiles rather than eight: at 260px wide the
+    # eight-tile panorama alone would be 237KB of a 256KB resource pack.
+    "chalk": Layout("chalk", 180, 180, CHALK_DECO),
+    "gabbro": Layout("gabbro", 260, 260, GABBRO_DECO, fg_tiles=6),
 }
 
 # The layout every generator below reads.  select() points it at a platform.
