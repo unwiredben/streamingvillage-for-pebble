@@ -3,8 +3,8 @@
 A parallax cityscape at sunset. Three layers scroll right to left at different
 speeds, and the time rides past on a billboard.
 
-![billboard](screenshots/billboard.png)
-![skyline](screenshots/skyline.png)
+![billboard](screenshots/emery-billboard.png)
+![skyline](screenshots/emery-skyline.png)
 ![the same scene on a Pebble Time](screenshots/basalt-billboard.png)
 ![skyline on a Pebble Time](screenshots/basalt-skyline.png)
 
@@ -288,6 +288,105 @@ disappears, and at 1.3x it looks sparse, so window pitch, lamp spacing, dash
 length and the like are chosen rather than computed. Because the scaling is
 the identity at 200x228, regenerating has to leave the emery PNGs
 byte-identical — that is the regression check for any change in this file.
+
+## Store animations
+
+`tools/capture_loop.py` records the scene in motion, one animated GIF per
+platform, for the storefront listings:
+
+    tools/capture_loop.py                 # every target platform
+    tools/capture_loop.py basalt chalk    # just these
+
+GIF is the default because it is the only format the stores actually animate.
+They reject WebP outright, and they accept an APNG upload but serve back only
+its first frame. `--format apng` and `--format webp` still write those — both
+are smaller and exactly lossless, so they are worth keeping as masters — and
+`--convert` re-encodes whatever is already in `screenshots/` into another format
+without going near the emulator:
+
+    tools/capture_loop.py --format apng   # lossless masters
+    tools/capture_loop.py --convert       # masters -> GIF for the store
+
+The script installs the app in the emulator, waits for the activation run to
+come to rest, taps the watch to start a fresh one, and pulls frames off the
+QEMU monitor with `screendump`. `pebble screenshot --gif-all-platforms` is the
+obvious alternative and is the wrong tool here: it records a fixed seven-second
+clip straddling a minute boundary, and this scene only animates in bursts, so
+by the time that capture starts the run has long since stopped.
+
+### One pass, and finding where it ends
+
+The clip is one billboard pass. A run is a whole number of passes and both
+starts and ends at the centred offset, so one pass is the shortest segment that
+begins and ends with the billboard — and so the clock — in the same place. It
+is not a perfect loop, and nothing short enough to be one exists: the three
+layers have incommensurate periods, 193 frames against 1536 and 4608 on basalt,
+so the whole scene only returns to its starting state after minutes. A pass
+puts the cut where it shows least, with the billboard, the clock and the road
+identical across it and only the skyline behind them stepping along.
+
+The seam is measured rather than assumed, by tracking the clock panel — the
+only near-white thing in its band — and ending the pass where it returns to
+where it started. Two things make that harder than it sounds, and both produced
+wrong clips before they were handled. Comparing whole frames does not work at
+all: the layers that cannot line up dominate the difference, enough to pick a
+frame most of a pass away. And the search has to be confined to the single
+crossing between one stall and the next. Before the stall the board has not
+gone anywhere yet; and stray near-white pixels from the lit windows jitter the
+measured centre by a fraction of a pixel, so walking outward until the distance
+grows stops on the jitter rather than at the seam. Within the window the best
+match is unambiguous, and every platform lands within a pixel. A seam further
+off than that, or a pass more than a quarter away from the length the constants
+imply, is an error rather than a bad file.
+
+### Timing the emulator will not give you
+
+Nothing about the emulator's timing can be taken on faith. Installing the app
+activates it, which starts a run of its own, and that has to finish before the
+tap or the tap merely extends it — so the script watches the billboard until it
+stops instead of sleeping on the nominal figure. Sleeping was not paranoid
+enough: because a run ends a fixed number of billboard crossings after the tap
+rather than a fixed time, an early tap can leave the scene coming to rest
+*inside* the capture, and then every resting frame matches the first one and the
+seam lands anywhere. Nor does the emulator keep app timers to `FRAME_MS`: a
+basalt pass takes 8.9s of wall clock against the 9.65s the constants specify,
+and under load gabbro stretched the other way, 19.0s against 15.85s. So the
+frames are played back over the nominal duration rather than the recorded one,
+which is what makes the animation run at the speed a watch runs it.
+
+Getting that onto a GIF takes one more step, because a GIF holds no frame rate:
+it holds a delay per frame, in whole hundredths of a second. None of these
+passes runs at a rate that divides into that — basalt's 18.4 fps would round to
+5cs and play 8% fast, losing exactly the pacing above. Rounding each frame's
+*cumulative* position instead spreads the error, so frames come out 5cs or 6cs
+and the total is exact to the centisecond. ffmpeg can only be told a constant
+rate, and feeding it per-frame durations through the concat demuxer comes back
+quantised into a 4cs/8cs stutter, so the delays are written into the encoded
+file afterwards — two bytes in each frame's control block. It is worth keeping
+ffmpeg for the encode: it rewrites pixels that did not change as the
+transparent index, which this scene compresses to about half of what writing
+whole frames does.
+
+### Colour and the unlit panel
+
+Nothing that can be injected lights the backlight on a watchface, so the panel
+is recorded unlit — a flat 67% linear scale — and scaled back up per frame.
+That reconstruction is good to a single level but not exact, because the
+emulator floors some channels on the way down: the palette lands on 84 and 170
+where the display's 64-colour grid has 85 and 170.
+
+The GIFs are visibly lossless. basalt, emery and gabbro come back pixel-for-
+pixel identical to the APNG masters, because the art uses fifteen colours and a
+GIF holds 256. chalk is the one exception, and only at the rim: its emulator
+antialiases the edge of the round display, which pushes the count to 259 and
+over what is left after reserving an entry for transparency, so 0.4% of its
+pixels shift by at most 6 of 255. The round displays keep their transparent
+corners, which is also why their frames carry a dispose-to-background flag
+rather than the retain-previous one the rectangular platforms use.
+
+At 230 KiB to 2.2 MiB the files are large but within what the stores take;
+`--frame-step N` roughly halves the size per doubling if one of them ever
+refuses, and shortens nothing.
 
 ## Build
 
