@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Ben Combee
+# SPDX-License-Identifier: MIT
 top = '.'
 out = 'build'
 

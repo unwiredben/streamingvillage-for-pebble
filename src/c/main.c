@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Ben Combee
+// SPDX-License-Identifier: MIT
 #include <pebble.h>
 
 #include "city_layer.h"

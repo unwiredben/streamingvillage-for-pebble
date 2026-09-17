@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Copyright (c) 2026 Ben Combee
+# SPDX-License-Identifier: MIT
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

@@ -419,3 +419,9 @@ scroll position in a tile with several notification offsets. The artwork check
 compares each platform's cropped resource with the original full-width
 procedural artwork, asserts the layout invariants `main.c` derives from, and
 sizes each platform's resource pack against the 256KB appstore ceiling.
+
+## Licence
+
+MIT — see [LICENSE](LICENSE). The generated artwork is covered by it too: there
+are no third-party assets in this repository, because `tools/gen_art.py` draws
+every image from scratch.

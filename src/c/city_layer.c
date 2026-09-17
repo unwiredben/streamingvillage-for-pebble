@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Ben Combee
+// SPDX-License-Identifier: MIT
 #include "city_layer.h"
 
 void city_layer_init(CityLayer *layer, const uint32_t *ids, uint8_t count,

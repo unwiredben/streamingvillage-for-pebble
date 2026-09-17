@@ -2,6 +2,7 @@
   "name": "Streaming Village",
   "author": "Ben Combee <combee@techwood.org>",
   "version": "1.2.0",
+  "license": "MIT",
   "keywords": [
     "pebble-app"
   ],

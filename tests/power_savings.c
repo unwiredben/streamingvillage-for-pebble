@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Ben Combee
+// SPDX-License-Identifier: MIT
 // Host regression checks using real watchface code and SDK declarations.
 // Unused UI setup/render functions are discarded by the host linker.
 #define main watchface_main

@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026 Ben Combee
+# SPDX-License-Identifier: MIT
 """Generate the parallax cityscape artwork for the Streaming Village watchface.
 
 The background and foreground are authored as seamless panoramas, then sliced

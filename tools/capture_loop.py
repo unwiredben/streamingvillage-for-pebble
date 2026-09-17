@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026 Ben Combee
+# SPDX-License-Identifier: MIT
 """Capture a looping animation of the scrolling scene, one per platform.
 
 Writes an animated GIF per platform, which is what the storefronts animate: they

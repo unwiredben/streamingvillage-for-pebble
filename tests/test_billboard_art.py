@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Ben Combee
+# SPDX-License-Identifier: MIT
 """Check the generated artwork against the geometry the watchface assumes."""
 import importlib.util
 from pathlib import Path

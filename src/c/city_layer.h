@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Ben Combee
+// SPDX-License-Identifier: MIT
 #pragma once
 
 #include <pebble.h>
