@@ -1,0 +1,1037 @@
+<!-- Copyright (c) 2026 Ben Combee. SPDX-License-Identifier: MIT -->
+<title>Streaming Village Build Notes</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@600;700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;600&display=swap">
+
+<style>
+  /* The palette is the watchface's own: the nine dithered sunset stops from
+     resources/images/sky~emery.png, on a near-black violet of the same family.
+     One committed look -- the subject is a dark display at dusk. */
+  :root {
+    --navy:      #000055;
+    --imperial:  #550055;
+    --violet:    #5500AA;
+    --purple:    #AA00AA;
+    --magenta:   #FF00AA;
+    --folly:     #FF0055;
+    --melon:     #FF5555;
+    --rajah:     #FFAA55;
+    --amber:     #FFAA00;
+    --window:    #00AAFF;
+
+    --ground:    #0A0016;
+    --raised:    #170230;
+    --raised-2:  #23063F;
+    --hairline:  #351258;
+    --ink:       #F0E8F8;
+    --ink-muted: #A796C2;
+    --panel:     #FFFFFF;
+
+    --display: "Chakra Petch", "Trebuchet MS", sans-serif;
+    --body: "IBM Plex Sans", "Segoe UI", Helvetica, Arial, sans-serif;
+    --mono: "IBM Plex Mono", "Courier New", monospace;
+
+    --step-0: 0.82rem;
+    --step-1: 0.95rem;
+    --step-2: 1.12rem;
+    --step-3: 1.5rem;
+    --step-4: clamp(1.6rem, 3.2vw, 2.3rem);
+    --step-5: clamp(2.1rem, 6vw, 3.9rem);
+  }
+
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--body);
+    font-size: var(--step-1);
+    line-height: 1.55;
+    overflow-x: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* The deck scrolls sideways, the way the scene does. The body never does. */
+  .deck {
+    display: flex;
+    height: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scroll-snap-type: x mandatory;
+    scroll-behavior: smooth;
+    scrollbar-width: none;
+  }
+  .deck::-webkit-scrollbar { display: none; }
+
+  .slide {
+    flex: 0 0 100%;
+    scroll-snap-align: center;
+    display: flex;
+    overflow-y: auto;
+    padding-block: clamp(20px, 4vh, 44px) 92px;
+  }
+  .inner {
+    flex: none;
+    width: min(1060px, 100%);
+    margin: auto;
+    padding-inline: clamp(16px, 4vw, 52px);
+    display: grid;
+    gap: clamp(16px, 2.4vh, 26px);
+  }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: var(--step-0);
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--amber);
+    margin: 0;
+  }
+  h1 {
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: var(--step-5);
+    line-height: 1.02;
+    letter-spacing: -0.015em;
+    text-wrap: balance;
+    margin: 0;
+  }
+  h2 {
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: var(--step-4);
+    line-height: 1.12;
+    text-wrap: balance;
+    margin: 0;
+  }
+  h3 {
+    font-family: var(--display);
+    font-weight: 600;
+    font-size: var(--step-2);
+    margin: 0;
+    color: var(--rajah);
+  }
+  p { margin: 0; max-width: 64ch; }
+  .lede { font-size: var(--step-2); color: var(--ink); max-width: 60ch; }
+  .muted { color: var(--ink-muted); }
+  strong { font-weight: 600; color: var(--panel); }
+  code, .num, .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  code {
+    font-size: 0.92em;
+    color: var(--window);
+    background: #0F0122;
+    border: 1px solid var(--hairline);
+    border-radius: 3px;
+    padding: 0.08em 0.34em;
+  }
+
+  .cols { display: grid; gap: clamp(16px, 2.6vw, 34px); align-items: start; }
+  @media (min-width: 760px) {
+    .cols-2 { grid-template-columns: 1fr 1fr; }
+    .cols-2-wide { grid-template-columns: 1.15fr 0.85fr; }
+    .cols-2-narrow { grid-template-columns: 0.8fr 1.2fr; }
+  }
+
+  .stack { display: grid; gap: 12px; align-content: start; }
+  .stack-tight { display: grid; gap: 7px; align-content: start; }
+
+  /* The watchface's clock billboard: white panel, magenta frame, on a pole. */
+  .billboard {
+    position: relative;
+    background: var(--panel);
+    color: var(--navy);
+    border: 3px solid var(--magenta);
+    border-radius: 2px;
+    padding: 12px 16px 11px;
+    display: grid;
+    gap: 2px;
+    justify-items: start;
+    margin-bottom: 15px;
+  }
+  .billboard::after {
+    content: "";
+    position: absolute;
+    left: 22px;
+    top: 100%;
+    width: 4px;
+    height: 15px;
+    background: #AAAAAA;
+  }
+  .billboard .num {
+    font-weight: 600;
+    font-size: var(--step-3);
+    line-height: 1;
+    letter-spacing: -0.01em;
+  }
+  .billboard .cap {
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #4A0A55;
+  }
+  .billboard-row {
+    display: grid;
+    gap: 14px;
+    grid-template-columns: repeat(auto-fit, minmax(126px, 1fr));
+  }
+
+  .panel {
+    background: var(--raised);
+    border: 1px solid var(--hairline);
+    border-radius: 6px;
+    padding: clamp(14px, 2vw, 20px);
+    display: grid;
+    gap: 10px;
+    align-content: start;
+  }
+  .panel-quiet { background: transparent; }
+
+  .log {
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    line-height: 1.7;
+    color: var(--ink-muted);
+    background: #08010F;
+    border: 1px solid var(--hairline);
+    border-radius: 6px;
+    padding: 13px 15px;
+    overflow-x: auto;
+  }
+  .log b { color: var(--amber); font-weight: 600; }
+  .log .ok { color: var(--window); }
+  .log .bad { color: var(--melon); }
+
+  ul { margin: 0; padding-left: 1.15em; display: grid; gap: 8px; }
+  ul.plain { list-style: none; padding-left: 0; }
+  li { max-width: 62ch; }
+  li::marker { color: var(--purple); }
+
+  .kv { display: grid; gap: 9px; }
+  .kv div {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 14px;
+    align-items: baseline;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--hairline);
+  }
+  .kv div:last-child { border-bottom: 0; padding-bottom: 0; }
+  .kv dt, .kv .k { color: var(--ink-muted); }
+  .kv .v { font-family: var(--mono); font-variant-numeric: tabular-nums; color: var(--ink); }
+
+  /* Memory: heap as the track, resident tiles as the fill. */
+  .meter { display: grid; gap: 5px; }
+  .meter-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: var(--step-0);
+  }
+  .meter-head .plat { font-family: var(--mono); color: var(--ink); }
+  .meter-head .val { font-family: var(--mono); color: var(--ink-muted); font-variant-numeric: tabular-nums; }
+  .track {
+    height: 16px;
+    background: #12012A;
+    border: 1px solid var(--hairline);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .fill { height: 100%; background: linear-gradient(90deg, var(--violet), var(--magenta)); }
+  .fill-tight { background: linear-gradient(90deg, var(--folly), var(--amber)); }
+
+  .shots { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); }
+  .shot { display: grid; gap: 8px; justify-items: center; }
+  .shot img {
+    width: 100%;
+    max-width: 150px;
+    height: auto;
+    image-rendering: pixelated;
+    border: 1px solid var(--hairline);
+    border-radius: 4px;
+    background: #000;
+  }
+  .shot .name { font-family: var(--mono); font-size: 0.74rem; color: var(--amber); text-align: center; }
+  .shot .dims { font-family: var(--mono); font-size: 0.7rem; color: var(--ink-muted); }
+
+  figure { margin: 0; display: grid; gap: 10px; justify-items: center; }
+  figcaption { font-size: var(--step-0); color: var(--ink-muted); max-width: 58ch; text-align: center; }
+  .fig-img { max-width: 100%; height: auto; image-rendering: pixelated; }
+
+  .loop {
+    image-rendering: pixelated;
+    width: min(260px, 62vw);
+    height: auto;
+    border: 1px solid var(--hairline);
+    border-radius: 4px;
+  }
+
+  canvas { display: block; max-width: 100%; }
+  .sunset-wrap { border-radius: 6px; overflow: hidden; border: 1px solid var(--hairline); }
+  #sunset { width: 100%; height: clamp(120px, 22vh, 210px); }
+  .dither-pair { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
+  .dither { display: grid; gap: 8px; }
+  .dither canvas {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 200 / 88;
+    image-rendering: pixelated;
+    border: 1px solid var(--hairline);
+    border-radius: 4px;
+  }
+  .dither .label { font-family: var(--mono); font-size: 0.76rem; }
+  .dither .label b { color: var(--amber); font-weight: 600; }
+  .dither .verdict { font-size: var(--step-0); color: var(--ink-muted); }
+
+  .chart { width: 100%; height: auto; }
+  .chart text { font-family: var(--mono); fill: var(--ink-muted); font-size: 11px; }
+  .chart .axis-title { fill: var(--ink-muted); font-size: 10.5px; letter-spacing: 0.06em; }
+  .chart .grid { stroke: var(--hairline); stroke-width: 1; }
+  .chart .ref { stroke: var(--window); stroke-width: 1; stroke-dasharray: 4 4; }
+  .chart .trace { fill: none; stroke: var(--amber); stroke-width: 2.4; stroke-linecap: round; }
+  .chart .mark { fill: var(--magenta); }
+  .chart .stall { fill: #12012A; stroke: var(--hairline); stroke-width: 1; }
+  .chart .stall-label { fill: var(--ink-muted); font-size: 10.5px; }
+  .chart .ref-label { fill: var(--window); font-size: 10.5px; }
+
+  .fail { display: grid; gap: 12px; }
+  .fail-row {
+    display: grid;
+    gap: 4px 16px;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: baseline;
+    padding-bottom: 11px;
+    border-bottom: 1px solid var(--hairline);
+  }
+  .fail-row:last-child { border-bottom: 0; padding-bottom: 0; }
+  .fail-row .measure {
+    font-family: var(--mono);
+    font-size: 0.86rem;
+    color: var(--melon);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .fail-row .what { color: var(--ink); }
+  .fail-row .why { grid-column: 1 / -1; font-size: var(--step-0); color: var(--ink-muted); }
+  @media (max-width: 559px) {
+    .fail-row { grid-template-columns: minmax(0, 1fr); }
+  }
+
+  .pill {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ground);
+    background: var(--amber);
+    border-radius: 2px;
+    padding: 2px 7px;
+  }
+  .pill-cool { background: var(--window); }
+
+  blockquote {
+    margin: 0;
+    padding-left: 15px;
+    border-left: 2px solid var(--purple);
+    font-family: var(--mono);
+    font-size: 0.86rem;
+    color: var(--ink);
+  }
+  blockquote cite { display: block; margin-top: 6px; font-style: normal; font-size: 0.76rem; color: var(--ink-muted); }
+
+  /* Navigation */
+  .nav {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    padding: 11px clamp(12px, 3vw, 24px);
+    padding-bottom: calc(11px + env(safe-area-inset-bottom, 0px));
+    background: linear-gradient(to top, var(--ground) 62%, transparent);
+    z-index: 5;
+  }
+  .nav button {
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    color: var(--ink);
+    background: var(--raised-2);
+    border: 1px solid var(--hairline);
+    border-radius: 3px;
+    padding: 5px 11px;
+    cursor: pointer;
+  }
+  .nav button:hover { border-color: var(--magenta); color: var(--panel); }
+  .nav button:focus-visible, .dots button:focus-visible {
+    outline: 2px solid var(--amber);
+    outline-offset: 2px;
+  }
+  .counter {
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    color: var(--ink-muted);
+    font-variant-numeric: tabular-nums;
+    min-width: 5.5ch;
+    text-align: center;
+  }
+  .dots { display: flex; gap: 6px; }
+  .dots button {
+    width: 9px;
+    height: 9px;
+    padding: 0;
+    border: 1px solid var(--purple);
+    border-radius: 50%;
+    background: transparent;
+    cursor: pointer;
+  }
+  .dots button[aria-current="true"] { background: var(--amber); border-color: var(--amber); }
+  @media (max-width: 559px) { .dots { display: none; } }
+
+  @media (prefers-reduced-motion: reduce) {
+    .deck { scroll-behavior: auto; }
+  }
+</style>
+
+<main class="deck" id="deck" tabindex="-1">
+
+  <!-- 1 -->
+  <section class="slide" aria-label="Title">
+    <div class="inner">
+      <p class="eyebrow">Pebble watchface &middot; four platforms &middot; built by Claude</p>
+      <h1>Streaming Village</h1>
+      <p class="lede">A parallax cityscape at sunset, on a 64&#8209;colour watch display with 64KB of
+        heap to spend. This is how it got built &mdash; and which parts of the work sit outside
+        what a software engineer is usually asked to do.</p>
+      <div class="sunset-wrap"><canvas id="sunset" width="900" height="210"></canvas></div>
+      <p class="muted" style="font-size: var(--step-0)">Above: the watchface's dithered sunset, redrawn live by the
+        same method <code>tools/gen_art.py</code> uses &mdash; nine colour stops, van der Corput thresholds.</p>
+    </div>
+  </section>
+
+  <!-- 2 -->
+  <section class="slide" aria-label="The artifact">
+    <div class="inner">
+      <p class="eyebrow">01 &middot; What exists</p>
+      <h2>One scene, four displays, no hand-drawn art</h2>
+      <div class="shots">
+        <div class="shot">
+          <img src="{{ASSET:screenshots/emery-billboard.png}}" alt="The watchface on a Pebble Time 2, billboard centred">
+          <span class="name">emery</span><span class="dims">200&times;228</span>
+        </div>
+        <div class="shot">
+          <img src="{{ASSET:screenshots/basalt-skyline.png}}" alt="The watchface on a Pebble Time, billboard off-screen">
+          <span class="name">basalt</span><span class="dims">144&times;168</span>
+        </div>
+        <div class="shot">
+          <img src="{{ASSET:screenshots/chalk-skyline.png}}" alt="The watchface on a Pebble Time Round">
+          <span class="name">chalk</span><span class="dims">180&times;180</span>
+        </div>
+        <div class="shot">
+          <img src="{{ASSET:screenshots/gabbro-billboard.png}}" alt="The watchface on a Pebble Round 2">
+          <span class="name">gabbro</span><span class="dims">260&times;260</span>
+        </div>
+      </div>
+      <div class="cols cols-2">
+        <div class="kv">
+          <div><span class="k">Watchface C</span><span class="v">589 lines</span></div>
+          <div><span class="k">Procedural artwork generator</span><span class="v">852 lines</span></div>
+          <div><span class="k">Store capture tool</span><span class="v">687 lines</span></div>
+          <div><span class="k">Host regression checks</span><span class="v">362 lines</span></div>
+        </div>
+        <div class="stack">
+          <p>Every tile of sky, ridge, skyline and billboard is generated &mdash; 15 images per
+            platform, 13 on gabbro &mdash; by a script with no image library, writing the PNGs itself.</p>
+          <blockquote>First commit, Claude-built watchface
+            <cite>git log, 8 September 2026</cite></blockquote>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3 -->
+  <section class="slide" aria-label="Deriving the layout">
+    <div class="inner">
+      <p class="eyebrow">02 &middot; Beyond the ask</p>
+      <h2>Two files that cannot drift apart</h2>
+      <div class="cols cols-2">
+        <div class="stack">
+          <p>The artwork generator and the watchface both need the scene's geometry. Writing
+            it down twice is the obvious approach, and it guarantees the two will disagree
+            eventually.</p>
+          <p>Instead every length is <strong>derived</strong> from the 200&times;228 emery reference by
+            the same integer scaling in both files. Both scalings are the identity at that size,
+            so the emery numbers fall out of the macros unchanged.</p>
+          <p class="muted">The relationships the layout rests on &mdash; the ridge sitting on the sky's
+            bottom edge, the street landing on the bottom of the display, a billboard tile being one
+            display plus one board &mdash; are asserted in tests. Drift fails a check instead of
+            showing up as a seam on someone's wrist.</p>
+        </div>
+        <div class="panel">
+          <h3>src/c/main.c</h3>
+          <div class="log"><b>#define</b> SCALE_X(v) ((v) * PBL_DISPLAY_WIDTH / EMERY_W)
+<b>#define</b> SCALE_Y(v) ((v) * PBL_DISPLAY_HEIGHT / EMERY_H)
+
+<b>#define</b> SKY_H   SCALE_Y(88)
+<b>#define</b> BG_H    SCALE_Y(40)
+<b>#define</b> BB_TILE_W (PBL_DISPLAY_WIDTH + BB_FRAME_W)</div>
+          <p class="muted" style="font-size: var(--step-0)">Nothing in <code>city_layer.c</code> knows a
+            display size at all. Only three values genuinely differ per platform: the billboard's
+            panel margin, the clock font, and gabbro's tile count.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4 -->
+  <section class="slide" aria-label="Memory">
+    <div class="inner">
+      <p class="eyebrow">03 &middot; The real constraint</p>
+      <h2>The heap decided what the art could be</h2>
+      <div class="cols cols-2-wide">
+        <div class="stack">
+          <div class="meter">
+            <div class="meter-head"><span class="plat">emery</span><span class="val">58.7 / 128 KB</span></div>
+            <div class="track"><div class="fill" style="width: 45.9%"></div></div>
+          </div>
+          <div class="meter">
+            <div class="meter-head"><span class="plat">basalt</span><span class="val">30.9 / 64 KB</span></div>
+            <div class="track"><div class="fill" style="width: 48.3%"></div></div>
+          </div>
+          <div class="meter">
+            <div class="meter-head"><span class="plat">chalk</span><span class="val">41.5 / 64 KB</span></div>
+            <div class="track"><div class="fill fill-tight" style="width: 64.8%"></div></div>
+          </div>
+          <div class="meter">
+            <div class="meter-head"><span class="plat">gabbro</span><span class="val">86.9 / 128 KB</span></div>
+            <div class="track"><div class="fill fill-tight" style="width: 67.9%"></div></div>
+          </div>
+          <p class="muted" style="font-size: var(--step-0)">Resident bitmap tiles against the app heap.
+            chalk is the tightest of the four: basalt's 64KB heap, a display half again as large in
+            area, about 13KB clear once the tiles are in.</p>
+        </div>
+        <div class="stack">
+          <p>Two tiles resident per scrolling layer, each palettised at the narrowest bit depth its
+            colour count allows &mdash; which is why the mountains cost two bits a pixel and the
+            skyline four.</p>
+          <p>Resources ship as <code>pbi</code>, not <code>png</code>. PNG would be far smaller on
+            flash, and decoding one needs a transient buffer on top of everything already resident,
+            while tiles load mid&#8209;animation.</p>
+          <h3>And it was measured, not estimated</h3>
+          <div class="log">Heap Usage for App &lt;Streaming :
+  Total Size <b>&lt;62400B&gt;</b> Used <b>&lt;32384B&gt;</b>
+  Still allocated <span class="ok">&lt;0B&gt;</span>
+main.c:341&gt; streaming village:
+  <b>57416</b> bytes heap free</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5 -->
+  <section class="slide" aria-label="The store ceiling">
+    <div class="inner">
+      <p class="eyebrow">04 &middot; Beyond the ask</p>
+      <h2>A distribution limit, folded back into the artwork</h2>
+      <div class="cols cols-2-narrow">
+        <div class="billboard-row">
+          <div class="billboard"><span class="num">237KB</span><span class="cap">8 tiles alone</span></div>
+          <div class="billboard"><span class="num">256KB</span><span class="cap">store ceiling</span></div>
+          <div class="billboard"><span class="num">6</span><span class="cap">tiles shipped</span></div>
+        </div>
+        <div class="stack">
+          <p>gabbro's foreground panorama is six tiles rather than eight. Eight 260&times;228 tiles are
+            29,640 bytes each &mdash; 237KB of a 256KB resource budget before the sky, the ridge or the
+            billboard get a byte, and a pack around 283KB.</p>
+          <p>That builds and sideloads fine: the hard limit is 1024KB. It is the <strong>appstore's</strong>
+            ceiling it fails, which is a constraint that only shows up when you think about
+            the watchface actually being published.</p>
+          <p class="muted">Six tiles is a 1560px loop, about 104 seconds of scrolling, and nothing on
+            the watch notices &mdash; <code>city_layer</code> reads its tile count from the array it is
+            handed. Two bitmaps are kept out of gabbro's pack entirely, and a test sizes every
+            platform's pack against the budget.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 6 -->
+  <section class="slide" aria-label="The dither">
+    <div class="inner">
+      <p class="eyebrow">05 &middot; Beyond the ask</p>
+      <h2>The textbook answer, tried and rejected</h2>
+      <p class="lede">A 64&#8209;colour display cannot render a sunset, so the gradient has to be
+        dithered. The standard tool is a Bayer matrix. On this particular gradient it fails
+        visibly &mdash; so the watchface uses something else.</p>
+      <div class="dither-pair">
+        <div class="dither">
+          <canvas id="bayer" width="200" height="88"></canvas>
+          <span class="label"><b>Bayer 8&times;8</b> &mdash; the default</span>
+          <span class="verdict">Each row of the matrix spans only part of the threshold range, so in a
+            purely vertical fade neighbouring rows land at different densities: horizontal streaks.</span>
+        </div>
+        <div class="dither">
+          <canvas id="vdc" width="200" height="88"></canvas>
+          <span class="label"><b>van der Corput</b> &mdash; what shipped</span>
+          <span class="verdict">Every row walks the full 0&ndash;63 range in bit&#8209;reversed order, so any
+            prefix is spread evenly, and each row is rotated by its own random amount so the dots never
+            line up into columns or diagonals.</span>
+        </div>
+      </div>
+      <p class="muted" style="font-size: var(--step-0)">Both panels are drawn here from the same nine stops the
+        watchface uses, one 85&#8209;per&#8209;channel step apart &mdash; the smallest step a 64&#8209;colour
+        display can make.</p>
+    </div>
+  </section>
+
+  <!-- 7 -->
+  <section class="slide" aria-label="Power">
+    <div class="inner">
+      <p class="eyebrow">06 &middot; Beyond the ask</p>
+      <h2>Someone has to wear this all day</h2>
+      <div class="cols cols-2">
+        <div class="stack">
+          <p>A watchface that scrolls continuously is a watchface that flattens a battery. This one
+            animates in <strong>bursts</strong>: two billboard passes when the face is activated or the
+            watch is tapped, then it holds still with the billboard centred and the time on it.</p>
+          <p>Within a run, the three layers move in fractions of a pixel, so a redraw is only
+            requested when an integer pixel position actually changes &mdash; and nothing is redrawn at
+            all during the billboard's two&#8209;second stall.</p>
+          <p class="muted">Both figures are pinned by <code>tests/power_savings.c</code>: change the
+            geometry and the test tells you the new count rather than quietly letting the cost drift.</p>
+        </div>
+        <div class="stack">
+          <div class="billboard-row">
+            <div class="billboard"><span class="num">386</span><span class="cap">timer steps</span></div>
+            <div class="billboard"><span class="num">366</span><span class="cap">redraws asked for</span></div>
+          </div>
+          <div class="panel panel-quiet">
+            <h3>The subtlety underneath</h3>
+            <p style="font-size: var(--step-0)">Activation fires <code>.appear</code> and
+              <code>did_focus</code> about a second apart, so starting a run has to be idempotent: it
+              sets the pass count rather than adding to it, and a run already going keeps its existing
+              timer. A tap resets the count instead of extending the run. A tap while unfocused cannot
+              start one at all.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 8 -->
+  <section class="slide" aria-label="Verification harnesses">
+    <div class="inner">
+      <p class="eyebrow">07 &middot; Beyond the ask</p>
+      <h2>Three harnesses nobody asked for</h2>
+      <p class="lede">A watchface is awkward to test: the code only runs on a watch, and the output is
+        pixels. So the parts that could be pulled onto the host, were.</p>
+      <div class="cols cols-2">
+        <div class="panel">
+          <h3>Execute the macros, don't re-derive them</h3>
+          <p style="font-size: var(--step-0)">The layout <code>#define</code> block was lifted into its own
+            header and compiled per platform by a nine&#8209;line C program that prints what the arithmetic
+            actually produces &mdash; real preprocessor, real integer division, no hand&#8209;checked
+            multiplication.</p>
+        </div>
+        <div class="panel">
+          <h3>Composite the scene without a watch</h3>
+          <p style="font-size: var(--step-0)">A host script imports the generator, decodes the produced PNGs
+            with <code>zlib</code> and <code>struct</code> by hand &mdash; no image library available &mdash; and
+            stacks the layers in <code>main.c</code>'s draw order to preview the scene at rest.</p>
+        </div>
+        <div class="panel">
+          <h3>Checksum the artwork</h3>
+          <p style="font-size: var(--step-0)">Because the per&#8209;platform scaling is the identity at
+            200&times;228, regenerating must leave the emery PNGs <strong>byte&#8209;identical</strong>. Recorded
+            hashes make that the regression test for any change to the generator.</p>
+        </div>
+        <div class="panel">
+          <h3>Compile the watchface for the host</h3>
+          <p style="font-size: var(--step-0)">The host checks include <code>main.c</code> itself with timers and
+            graphics replaced by recording stubs, then cover focus loss, taps, redraw counts, minute
+            updates, notification offsets, and billboard placement at <strong>every</strong> scroll position
+            in a tile.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 9 -->
+  <section class="slide" aria-label="Interlude: the store animation">
+    <div class="inner">
+      <p class="eyebrow">Part two</p>
+      <h2>&ldquo;Capture an animation for the storefronts&rdquo;</h2>
+      <div class="cols cols-2">
+        <figure>
+          <img class="loop" src="{{ASSET:screenshots/basalt-loop.gif}}" alt="The watchface animating: the billboard carrying the time scrolls across the skyline">
+          <figcaption>basalt, 177 frames, 9.65s, looping &mdash; the actual delivered file</figcaption>
+        </figure>
+        <div class="stack">
+          <p class="lede">One sentence of a request. The four files it produced took the rest of the
+            session, because almost nothing about the obvious approach survived contact with the
+            problem.</p>
+          <p class="muted">What follows is the part of engineering that does not appear in a ticket:
+            rejecting the tool that looks right, reading the source for numbers nobody wrote down,
+            being wrong in a way that gets caught, and checking the output at the level the format is
+            actually defined at.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 10 -->
+  <section class="slide" aria-label="Rejecting the obvious tool">
+    <div class="inner">
+      <p class="eyebrow">08 &middot; Beyond the ask</p>
+      <h2>The built-in tool was the wrong tool</h2>
+      <div class="cols cols-2">
+        <div class="stack">
+          <h3>What it does</h3>
+          <p><code>pebble screenshot --gif-all-platforms</code> exists precisely for this job. It waits
+            for the next wall&#8209;clock minute boundary &mdash; between 8 and 68 seconds &mdash; then records a
+            fixed seven&#8209;second clip, so the minute digit rolls over on camera.</p>
+        </div>
+        <div class="stack">
+          <h3>Why it cannot work here</h3>
+          <p>This watchface animates in bursts and then stops. By the time that capture begins, the run
+            triggered by installing the app is long over. The clip would be a <strong>still skyline with a
+            ticking clock</strong> &mdash; technically a successful capture of the wrong thing.</p>
+          <p class="muted">Reading its implementation first was the cheap part. Its emulator plumbing,
+            install sequence, frame grabbing and brightness handling were all worth reusing; only its
+            capture window had to go.</p>
+        </div>
+      </div>
+      <p class="muted" style="font-size: var(--step-0)">A tool that runs without error, and produces a file, and
+        is still wrong, is the failure mode worth looking for before pressing go.</p>
+    </div>
+  </section>
+
+  <!-- 11 -->
+  <section class="slide" aria-label="Ground truth from the source">
+    <div class="inner">
+      <p class="eyebrow">09 &middot; Beyond the ask</p>
+      <h2>Proving what the loop could be, before capturing it</h2>
+      <div class="cols cols-2-wide">
+        <div class="stack">
+          <p>How long is one pass? Not measured &mdash; <strong>derived</strong>, from the constants in
+            <code>main.c</code>: a 230px tile at 1.5px per frame, plus a 2000ms stall at 50ms per frame,
+            is 193 frames on basalt.</p>
+          <p>Then the harder question: can the loop be seamless? The three layers repeat every
+            <span class="mono">193</span>, <span class="mono">1536</span> and
+            <span class="mono">4608</span> frames. Those periods are incommensurate, so
+            <strong>no clip shorter than minutes returns the whole scene to its starting state</strong>.
+            That is a property of the design, and it settles the question before a single frame is
+            recorded.</p>
+          <p>So the cut goes where it costs least: one billboard pass, which puts the billboard, the
+            clock and the road in exactly the same place on both sides, and lets only the skyline
+            behind them step along.</p>
+        </div>
+        <figure>
+          <img class="fig-img" src="{{ASSET:slides/figs/seam.png}}" alt="First and last frame of the loop side by side: the billboard, clock and road are in identical positions, the buildings behind them differ" width="592" height="336">
+          <figcaption>First and final frame of the delivered loop. The last frame is the one
+            <em>before</em> the match, so the wrap advances the billboard by one ordinary 1.5px
+            step &mdash; the seam keeps the cadence of every other frame.</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <!-- 12 -->
+  <section class="slide" aria-label="Measuring the seam">
+    <div class="inner">
+      <p class="eyebrow">10 &middot; Beyond the ask</p>
+      <h2>Measure the thing, not something correlated with it</h2>
+      <div class="cols cols-2-wide">
+        <svg class="chart" viewBox="0 0 680 250" role="img" aria-label="The clock panel's horizontal centre across the captured pass: it starts centred, moves left, disappears for the billboard's stall, re-enters from the right and returns to where it started.">
+          <line class="grid" x1="52" y1="18" x2="52" y2="216"></line>
+          <line class="grid" x1="52" y1="216" x2="666" y2="216"></line>
+          <line class="grid" x1="52" y1="18" x2="666" y2="18"></line>
+          <line class="grid" x1="52" y1="117" x2="666" y2="117"></line>
+          <text x="46" y="22" text-anchor="end">144</text>
+          <text x="46" y="121" text-anchor="end">72</text>
+          <text x="46" y="220" text-anchor="end">0</text>
+          <text class="axis-title" x="52" y="243">frame 0</text>
+          <text class="axis-title" x="666" y="243" text-anchor="end">frame {{CHART_FRAMES}}</text>
+          <rect class="stall" x="{{CHART_STALL_X}}" y="18" width="{{CHART_STALL_W}}" height="198"></rect>
+          <line class="ref" x1="52" y1="{{CHART_START_Y}}" x2="666" y2="{{CHART_START_Y}}"></line>
+          <polyline class="trace" points="{{CHART_APPROACH}}"></polyline>
+          <polyline class="trace" points="{{CHART_RETURN}}"></polyline>
+          <circle class="mark" cx="{{CHART_START_X}}" cy="{{CHART_START_PY}}" r="4"></circle>
+          <circle class="mark" cx="{{CHART_END_X}}" cy="{{CHART_END_PY}}" r="4"></circle>
+          <text class="ref-label" x="58" y="{{CHART_START_Y}}" dy="-6">where it started</text>
+          <text class="stall-label" x="{{CHART_STALL_X}}" y="34" dx="7">billboard off-screen</text>
+          <text class="axis-title" x="52" y="11">clock panel centre, px from left edge</text>
+        </svg>
+        <div class="stack">
+          <p>Finding the end of a pass by comparing whole frames does not work: the two layers that
+            <em>cannot</em> line up dominate any image difference. That method picked a frame most of a
+            pass away, with the billboard at the opposite edge.</p>
+          <p>So the script measures the one thing that defines a pass &mdash; the clock panel's horizontal
+            centre. The panel is the only near&#8209;white object in its band, so thresholding on the
+            <strong>smallest</strong> channel finds it and ignores the coloured windows around it.</p>
+          <p class="muted">Real data from the delivered basalt loop. The pass ends where the trace comes
+            back to the dashed line.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 13 -->
+  <section class="slide" aria-label="Being wrong loudly">
+    <div class="inner">
+      <p class="eyebrow">11 &middot; Beyond the ask</p>
+      <h2>Three wrong answers, each caught by its own check</h2>
+      <div class="fail">
+        <div class="fail-row">
+          <span class="measure">8.75s</span>
+          <span class="what">Whole&#8209;frame image difference picked the seam.</span>
+          <span class="why">Caught by looking at the chosen frame: the billboard was at the right edge,
+            not centred. Replaced with the panel&#8209;centre measurement.</span>
+        </div>
+        <div class="fail-row">
+          <span class="measure">22.90s vs 15.85s</span>
+          <span class="what">The search took the best match anywhere in the capture.</span>
+          <span class="why">If the scene comes to rest inside the window &mdash; which it can, because a run
+            ends after a number of billboard crossings, not a number of seconds &mdash; every resting frame
+            ties with the first one and a late frame wins by luck. Now the emulator is watched until the
+            scene stops <em>before</em> the capture starts.</span>
+        </div>
+        <div class="fail-row">
+          <span class="measure">5.85s, +48.5px</span>
+          <span class="what">Walking outward until the distance grew.</span>
+          <span class="why">Stray near&#8209;white pixels from lit windows jitter the measured centre by a
+            fraction of a pixel, so the walk stopped on the jitter. Now the search is confined to the
+            single crossing between one stall and the next.</span>
+        </div>
+      </div>
+      <div class="cols cols-2">
+        <p>None of these three produced an error. Each produced a plausible file that was wrong, which
+          is why each is now a <strong>hard failure</strong> rather than a bad output.</p>
+        <div class="stack-tight">
+          <span><span class="pill">guard</span> seam more than 2px off &rarr; error</span>
+          <span><span class="pill">guard</span> pass &gt;25% from the derived length &rarr; error</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 14 -->
+  <section class="slide" aria-label="Down to the bytes">
+    <div class="inner">
+      <p class="eyebrow">12 &middot; Beyond the ask</p>
+      <h2>The format did not support the answer</h2>
+      <div class="cols cols-2">
+        <div class="stack">
+          <p>A GIF holds no frame rate. It holds a <strong>delay per frame, in whole hundredths of a
+            second</strong>. None of these passes runs at a rate that divides into that: basalt's 18.4fps
+            rounds to 5cs and plays <strong>8% fast</strong> &mdash; discarding the timing work that made the
+            animation match real hardware in the first place.</p>
+          <p>Rounding each frame's <em>cumulative</em> position instead spreads the error. Frames come
+            out 5cs or 6cs &mdash; a 10ms difference nobody can see &mdash; and the total is exact.</p>
+          <p class="muted">ffmpeg can only be told a constant rate, and feeding it per&#8209;frame durations
+            through the concat demuxer came back quantised into a 4cs/8cs stutter. So the delays are
+            written into the encoded file afterwards: two bytes inside each frame's control block.
+            ffmpeg is still worth keeping for the encode &mdash; it rewrites unchanged pixels as the
+            transparent index, which halves the file against writing whole frames.</p>
+        </div>
+        <div class="stack">
+          <div class="log">basalt  <span class="ok">9.650s</span>  want 9.65
+chalk   <span class="ok">11.550s</span> want 11.55
+emery   <span class="ok">12.650s</span> want 12.65
+gabbro  <span class="ok">15.850s</span> want 15.85
+<span class="muted">delays: {5: 97, 6: 80} &mdash; summed from
+the file's own control blocks</span></div>
+          <div class="panel">
+            <h3>And the number that explained itself</h3>
+            <p style="font-size: var(--step-0)">Checking the GIFs against the lossless masters, the two round
+              watches showed <strong>20.7%</strong> and <strong>21.5%</strong> of pixels differing. Alarming
+              &mdash; until the figure is recognised: <span class="mono">1 &minus; &pi;/4 = 21.46%</span>, the
+              fraction of a square outside its inscribed circle. It was the hidden colour underneath the
+              transparent corners. Nothing visible was affected.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 15 -->
+  <section class="slide" aria-label="Beyond the ask and honest limits">
+    <div class="inner">
+      <p class="eyebrow">13 &middot; Where the line actually is</p>
+      <h2>Things outside the request, and things still wrong</h2>
+      <div class="cols cols-2">
+        <div class="stack">
+          <h3>Volunteered</h3>
+          <ul>
+            <li>Noticed that a commit had renamed two screenshots and left the readme pointing at
+              files that no longer existed &mdash; reported and fixed.</li>
+            <li>Found that ffmpeg's brightness filter truncates: it produced 169 where the display's
+              colour grid has 170.</li>
+            <li>Declined to &ldquo;fix&rdquo; that by snapping every colour to the grid, because it would
+              also flatten the antialiased rim on the round displays. Flagged it as a decision rather
+              than making it quietly.</li>
+          </ul>
+        </div>
+        <div class="stack">
+          <h3>Still true, and worth saying</h3>
+          <ul>
+            <li>I have no memory of the earlier sessions. Everything in part one was reconstructed from
+              the code, the readme, a device log and a scratch directory &mdash; not recalled.</li>
+            <li>The colour reconstruction is still one level off in places; the emulator floors some
+              channels when it dims the panel, and no single scale recovers them.</li>
+            <li>The emulator is not a watch. Its timers run a few percent off, and under load gabbro
+              stretched 19.0s against a 15.85s pass.</li>
+            <li>gabbro's GIF is 2.2MB. It fits, but it is the one I would watch on upload.</li>
+          </ul>
+        </div>
+      </div>
+      <p class="muted" style="font-size: var(--step-0)">The store, for the record, rejects WebP outright and
+        accepts an APNG upload while serving back only its first frame. Which is how the deliverable
+        ended up being a GIF.</p>
+    </div>
+  </section>
+
+</main>
+
+<nav class="nav" aria-label="Slide navigation">
+  <button type="button" id="prev" aria-label="Previous slide">&larr;</button>
+  <span class="counter" id="counter">01 / 15</span>
+  <div class="dots" id="dots" aria-label="Jump to slide"></div>
+  <button type="button" id="next" aria-label="Next slide">&rarr;</button>
+</nav>
+
+<script>
+  // ---- navigation -------------------------------------------------------
+  var deck = document.getElementById("deck");
+  var slides = Array.prototype.slice.call(deck.querySelectorAll(".slide"));
+  var counter = document.getElementById("counter");
+  var dotsBox = document.getElementById("dots");
+  var current = 0;
+
+  function pad(n) { return (n < 10 ? "0" : "") + n; }
+
+  var dots = slides.map(function (slide, index) {
+    var dot = document.createElement("button");
+    dot.type = "button";
+    dot.setAttribute("aria-label", "Slide " + (index + 1));
+    dot.addEventListener("click", function () { go(index); });
+    dotsBox.appendChild(dot);
+    return dot;
+  });
+
+  function paint() {
+    counter.textContent = pad(current + 1) + " / " + pad(slides.length);
+    dots.forEach(function (dot, index) {
+      dot.setAttribute("aria-current", index === current ? "true" : "false");
+    });
+  }
+
+  function go(index) {
+    current = Math.max(0, Math.min(slides.length - 1, index));
+    slides[current].scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+    paint();
+  }
+
+  document.getElementById("prev").addEventListener("click", function () { go(current - 1); });
+  document.getElementById("next").addEventListener("click", function () { go(current + 1); });
+
+  window.addEventListener("keydown", function (event) {
+    if (event.key === "ArrowRight" || event.key === "PageDown") { go(current + 1); }
+    else if (event.key === "ArrowLeft" || event.key === "PageUp") { go(current - 1); }
+    else if (event.key === "Home") { go(0); }
+    else if (event.key === "End") { go(slides.length - 1); }
+    else { return; }
+    event.preventDefault();
+  });
+
+  // Keep the counter honest when the deck is swiped or scrolled directly.
+  var settle;
+  deck.addEventListener("scroll", function () {
+    clearTimeout(settle);
+    settle = setTimeout(function () {
+      var index = Math.round(deck.scrollLeft / deck.clientWidth);
+      if (index !== current) { current = index; paint(); }
+    }, 90);
+  }, { passive: true });
+
+  paint();
+
+  // ---- the watchface's own dithering ------------------------------------
+  // Nine stops, one 85-per-channel step apart, straight from sky~emery.png.
+  var STOPS = [
+    [0, 0, 85], [85, 0, 85], [85, 0, 170], [170, 0, 170], [255, 0, 170],
+    [255, 0, 85], [255, 85, 85], [255, 170, 85], [255, 170, 0]
+  ];
+
+  // Bit-reversed 6-bit counter: any prefix of it is spread evenly across 0-63.
+  var VDC = [];
+  for (var i = 0; i < 64; i++) {
+    var reversed = 0;
+    for (var bit = 0; bit < 6; bit++) {
+      if ((i >> bit) & 1) { reversed |= 1 << (5 - bit); }
+    }
+    VDC.push(reversed);
+  }
+
+  var BAYER = [
+    [0, 32, 8, 40, 2, 34, 10, 42], [48, 16, 56, 24, 50, 18, 58, 26],
+    [12, 44, 4, 36, 14, 46, 6, 38], [60, 28, 52, 20, 62, 30, 54, 22],
+    [3, 35, 11, 43, 1, 33, 9, 41], [51, 19, 59, 27, 49, 17, 57, 25],
+    [15, 47, 7, 39, 13, 45, 5, 37], [63, 31, 55, 23, 61, 29, 53, 21]
+  ];
+
+  // Deterministic per-row rotation, so the page looks the same every load.
+  function rotationFor(row) {
+    var x = Math.sin(row * 12.9898) * 43758.5453;
+    return Math.floor((x - Math.floor(x)) * 64);
+  }
+
+  function dither(canvas, mode) {
+    var ctx = canvas.getContext("2d");
+    if (!ctx) { return; }
+    var w = canvas.width, h = canvas.height;
+    var image = ctx.createImageData(w, h);
+    var data = image.data;
+    var spans = STOPS.length - 1;
+    for (var y = 0; y < h; y++) {
+      var position = (y / (h - 1)) * spans;
+      var lower = Math.min(spans - 1, Math.floor(position));
+      var fraction = position - lower;
+      var rotation = rotationFor(y);
+      for (var x = 0; x < w; x++) {
+        var threshold = mode === "bayer"
+          ? BAYER[y % 8][x % 8]
+          : VDC[(x + rotation) % 64];
+        var stop = STOPS[threshold < fraction * 64 ? lower + 1 : lower];
+        var at = (y * w + x) * 4;
+        data[at] = stop[0];
+        data[at + 1] = stop[1];
+        data[at + 2] = stop[2];
+        data[at + 3] = 255;
+      }
+    }
+    ctx.putImageData(image, 0, 0);
+  }
+
+  dither(document.getElementById("bayer"), "bayer");
+  dither(document.getElementById("vdc"), "vdc");
+
+  // The title band: the same ramp, sized to its box.
+  var sunset = document.getElementById("sunset");
+  function paintSunset() {
+    var rect = sunset.getBoundingClientRect();
+    sunset.width = Math.max(320, Math.round(rect.width));
+    sunset.height = Math.max(90, Math.round(rect.height));
+    dither(sunset, "vdc");
+  }
+  paintSunset();
+  var resizeTimer;
+  window.addEventListener("resize", function () {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(paintSunset, 150);
+  });
+</script>
