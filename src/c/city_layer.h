@@ -14,8 +14,12 @@
 #define SUBPIX_SHIFT 4
 #define SUBPIX(px) ((int32_t)(px) << SUBPIX_SHIFT)
 
+// Fills a generated tile with the panorama starting at absolute x `x0`.
+typedef void (*CityTileGen)(GBitmap *tile, int32_t x0);
+
 typedef struct {
-  const uint32_t *ids;   // one resource id per tile, left to right
+  const uint32_t *ids;   // one resource id per tile, left to right; NULL when
+                         // the tiles are generated
   uint8_t count;         // number of tiles in the panorama
   int16_t tile_w;        // logical repeat width, >= MIN_TILE_W
   int16_t image_x;       // image inset within the logical tile (cropped margins)
@@ -30,6 +34,12 @@ typedef struct {
   uint16_t pause_frames;
   uint16_t pause_left;
 
+  // A generated layer draws its tiles instead of loading them: the two slots
+  // are created blank once and refilled in place, which is what lets the
+  // panorama be longer than a resource pack could hold.
+  CityTileGen generate;  // NULL when the tiles are stored bitmaps
+  GColor *palette;       // palette the generated tiles are drawn against
+
   int32_t offset;        // scroll position, in subpixels
   GBitmap *slot[2];      // the only two tiles held in memory
   int8_t slot_tile[2];   // which tile each slot holds, -1 when empty
@@ -38,6 +48,12 @@ typedef struct {
 
 void city_layer_init(CityLayer *layer, const uint32_t *ids, uint8_t count,
                      int16_t tile_w, int16_t height, int16_t y, int16_t speed);
+
+// As above, but the tiles are generated on demand rather than loaded.  The
+// palette has to outlive the layer; city_gen_palette() returns a static one.
+void city_layer_init_generated(CityLayer *layer, CityTileGen generate,
+                               GColor *palette, uint8_t count, int16_t tile_w,
+                               int16_t height, int16_t y, int16_t speed);
 
 void city_layer_deinit(CityLayer *layer);
 

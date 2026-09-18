@@ -45,4 +45,13 @@ for platform in "${platforms[@]}"; do
     fi
   done
 done
+
+# The generated cityscape is checked against the Python it was ported from,
+# for every platform at once.
+if python3 tests/test_city_gen.py; then
+  echo "PASS: city_gen matches tools/gen_art.py"
+else
+  result=1
+fi
+
 exit "$result"

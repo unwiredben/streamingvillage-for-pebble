@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 #include <pebble.h>
 
+#include "city_gen.h"
 #include "city_layer.h"
 
 // ---------------------------------------------------------------------------
@@ -24,17 +25,13 @@
 // that has to stay inside the circle is the clock panel, and it does on both
 // -- x 43..137 / y 114..148 on chalk, x 62..198 / y 165..214 on gabbro.
 //
+// The foreground is not stored artwork: city_gen.h carries its lengths and
+// src/c/city_gen.c draws it a tile at a time.
+//
 // tests/test_billboard_art.py asserts the invariants both files rely on.
 // ---------------------------------------------------------------------------
-#define EMERY_W 200
-#define EMERY_H 228
-
-// A horizontal / vertical length scaled from the emery reference.  Both are
-// the identity on emery.
-#define SCALE_X(v) ((v) * PBL_DISPLAY_WIDTH / EMERY_W)
-#define SCALE_Y(v) ((v) * PBL_DISPLAY_HEIGHT / EMERY_H)
-// Rounded up to even, so a centred inset stays symmetric.
-#define EVEN(v) (((v) + 1) & ~1)
+// EMERY_W/H, SCALE_X/SCALE_Y and EVEN come from city_gen.h, which needs them
+// for the foreground and is the one place they are defined.
 
 #define SKY_H SCALE_Y(88)        // static dithered sunset, full width, opaque
 
@@ -42,16 +39,11 @@
 #define BG_Y (SKY_H - BG_H)
 #define BG_TILES 6
 
-#define FG_H SCALE_Y(200)        // near buildings and street, alpha
+// Near buildings and street, alpha.  FG_H and FG_TILES come from city_gen.h:
+// the tiles are generated rather than stored, so the panorama is 32 tiles on
+// every platform -- the old six-tile gabbro compromise, forced by a 256KB
+// resource pack, is gone along with the stored artwork.
 #define FG_Y (PBL_DISPLAY_HEIGHT - FG_H)
-// Six tiles rather than eight on gabbro: a 260x228 tile is 29,640 bytes, so
-// the eight-tile panorama alone would be 237KB of a 256KB resource pack.
-// package.json keeps IMG_FG_6 and IMG_FG_7 off that platform to match.
-#if defined(PBL_PLATFORM_GABBRO)
-  #define FG_TILES 6
-#else
-  #define FG_TILES 8
-#endif
 
 // The billboard sits just over the top of the road, on a pole that runs off
 // the bottom of the display.
@@ -138,19 +130,18 @@ static const uint32_t s_bg_ids[BG_TILES] = {
   RESOURCE_ID_IMG_BG_3, RESOURCE_ID_IMG_BG_4, RESOURCE_ID_IMG_BG_5,
 };
 
-static const uint32_t s_fg_ids[FG_TILES] = {
-  RESOURCE_ID_IMG_FG_0, RESOURCE_ID_IMG_FG_1, RESOURCE_ID_IMG_FG_2,
-  RESOURCE_ID_IMG_FG_3, RESOURCE_ID_IMG_FG_4, RESOURCE_ID_IMG_FG_5,
-#if FG_TILES == 8
-  RESOURCE_ID_IMG_FG_6, RESOURCE_ID_IMG_FG_7,
-#endif
-};
-
 static const uint32_t s_bb_ids[BB_TILES] = {
   RESOURCE_ID_IMG_BB_0,
 };
 
 // ---------------------------------------------------------------------------
+
+// Draws one foreground tile.  city_gen.c works on the raw palettised pixels,
+// so it needs nothing from the GBitmap but its buffer and geometry.
+static void foreground_tile(GBitmap *tile, int32_t x0) {
+  city_gen_foreground(gbitmap_get_data(tile), gbitmap_get_bytes_per_row(tile),
+                      gbitmap_get_bounds(tile).size.w, x0);
+}
 
 static void update_time_text(void) {
   const time_t now = time(NULL);
@@ -305,14 +296,24 @@ static void window_load(Window *window) {
 
   city_layer_init(&s_background, s_bg_ids, BG_TILES, MIN_TILE_W, BG_H, BG_Y,
                   BG_SPEED);
-  city_layer_init(&s_foreground, s_fg_ids, FG_TILES, MIN_TILE_W, FG_H, FG_Y,
-                  FG_SPEED);
+  city_layer_init_generated(&s_foreground, foreground_tile,
+                            city_gen_palette(), FG_TILES, MIN_TILE_W, FG_H,
+                            FG_Y, FG_SPEED);
   city_layer_init(&s_billboard, s_bb_ids, BB_TILES, BB_TILE_W, BB_H, BB_Y,
                   BB_SPEED);
   s_billboard.image_x = BB_FRAME_X;
   city_layer_set_pause(&s_billboard, BB_CLEAR_AT, BB_PAUSE_MS, FRAME_MS);
 
   s_billboard.offset = SUBPIX(BB_REST_PX);
+
+  // Start somewhere different every time the watchface is loaded, so the same
+  // stretch of city is not the first thing on screen each morning.  This
+  // moves where the loop starts, not what is in it: the panorama is still the
+  // fixed one tests/test_city_gen.py pins, which is what lets it be checked
+  // at all.  The billboard is left alone -- its rest position is where the
+  // clock ends up.
+  srand((unsigned int)time(NULL));
+  s_foreground.offset = SUBPIX(rand() % (MIN_TILE_W * FG_TILES));
 
   s_scene_layer = layer_create(bounds);
   layer_set_update_proc(s_scene_layer, scene_update_proc);

@@ -83,7 +83,7 @@ def _even(value):
 
 
 class Layout(object):
-    def __init__(self, name, screen_w, screen_h, deco, fg_tiles=8):
+    def __init__(self, name, screen_w, screen_h, deco, fg_tiles=32):
         self.name = name
         self.SCREEN_W = screen_w
         self.SCREEN_H = screen_h
@@ -123,6 +123,27 @@ class Layout(object):
         self.FG_TOP_COMMON = (58 * self.FG_H // 200, 90 * self.FG_H // 200)
         self.FG_STUB_TOP = 90 * self.FG_H // 200
 
+        # -- the tower slot grid the procedural foreground walks --
+        # Towers sit in FG_SLOTS evenly spaced cells rather than being packed
+        # left to right, so slot n can be drawn without having drawn slot n-1.
+        # Cell origins are n * FG_W // FG_SLOTS, which spreads the rounding
+        # error a pixel at a time and lands exactly on FG_W -- the panorama
+        # wraps with no special case at the seam.
+        self.FG_SLOTS = (self.FG_W + deco["tower_pitch"] // 2) // \
+            deco["tower_pitch"]
+        # How far right of its cell origin a tower can reach, which is how far
+        # back a span has to start scanning to catch everything overlapping it.
+        self.FG_SLOT_REACH = deco["tower_jitter"] + deco["tower_w"][1]
+
+        # Street furniture is periodic, and its period has to divide FG_W or
+        # the pattern jumps at the wrap.  Both are counted out across the
+        # panorama instead of stepping by a fixed pixel pitch: the authored
+        # spacing is only a target, and dash_step divides FG_W on basalt alone.
+        self.FG_DASHES = (self.FG_W + deco["dash_step"] // 2) // \
+            deco["dash_step"]
+        self.FG_LAMPS = (self.FG_W + deco["lamp_step"] // 2) // \
+            deco["lamp_step"]
+
         # -- billboard: a tile one display wider than the board, so the board
         #    clears the left edge exactly as its repeat reaches the right one --
         self.BB_TILES = 1
@@ -150,7 +171,7 @@ EMERY_DECO = {
     "spot_left": 14, "spot_right": 18,
     "spot_w": 4, "spot_h": 3, "spot_glow": 1,
     # towers
-    "tower_w": (24, 54),
+    "tower_w": (24, 54), "tower_pitch": 34, "tower_jitter": 7,
     "win_top": 5, "win_bottom": 8, "win_step": 10,
     "win_left": 4, "win_right": 6, "win_pitch": 8,
     "win_w": 3, "win_h": 5,
@@ -171,7 +192,7 @@ BASALT_DECO = {
     "ring": 2, "art_inset": 5, "pole_lit": 2,
     "spot_left": 10, "spot_right": 13,
     "spot_w": 3, "spot_h": 2, "spot_glow": 1,
-    "tower_w": (18, 40),
+    "tower_w": (18, 40), "tower_pitch": 24, "tower_jitter": 5,
     "win_top": 4, "win_bottom": 6, "win_step": 8,
     "win_left": 3, "win_right": 5, "win_pitch": 6,
     "win_w": 2, "win_h": 4,
@@ -191,7 +212,7 @@ CHALK_DECO = {
     "ring": 2, "art_inset": 5, "pole_lit": 2,
     "spot_left": 13, "spot_right": 16,
     "spot_w": 4, "spot_h": 2, "spot_glow": 1,
-    "tower_w": (22, 49),
+    "tower_w": (22, 49), "tower_pitch": 30, "tower_jitter": 6,
     "win_top": 4, "win_bottom": 6, "win_step": 8,
     "win_left": 4, "win_right": 5, "win_pitch": 7,
     "win_w": 3, "win_h": 4,
@@ -211,7 +232,7 @@ GABBRO_DECO = {
     "ring": 3, "art_inset": 6, "pole_lit": 3,
     "spot_left": 18, "spot_right": 23,
     "spot_w": 5, "spot_h": 3, "spot_glow": 1,
-    "tower_w": (31, 70),
+    "tower_w": (31, 70), "tower_pitch": 44, "tower_jitter": 9,
     "win_top": 6, "win_bottom": 9, "win_step": 11,
     "win_left": 5, "win_right": 8, "win_pitch": 10,
     "win_w": 4, "win_h": 6,
@@ -230,10 +251,11 @@ PLATFORMS = {
     "emery": Layout("emery", 200, 228, EMERY_DECO),
     "basalt": Layout("basalt", 144, 168, BASALT_DECO),
     # gabbro is round, and the scene is simply clipped by the circle -- see
-    # readme.md.  Six foreground tiles rather than eight: at 260px wide the
-    # eight-tile panorama alone would be 237KB of a 256KB resource pack.
+    # readme.md.  The foreground panorama is the same length everywhere now
+    # that it is generated on the watch rather than stored: the old six-tile
+    # gabbro limit was a 256KB resource pack, not a display.
     "chalk": Layout("chalk", 180, 180, CHALK_DECO),
-    "gabbro": Layout("gabbro", 260, 260, GABBRO_DECO, fg_tiles=6),
+    "gabbro": Layout("gabbro", 260, 260, GABBRO_DECO),
 }
 
 # The layout every generator below reads.  select() points it at a platform.
@@ -309,6 +331,101 @@ class Canvas(object):
                 tile.px[y] = [src[(t * tile_w + x) % self.w]
                               for x in range(tile_w)]
             write_png(art_path("%s_%d" % (prefix, t)), tile)
+
+
+class SpanCanvas(object):
+    """A window onto the panorama, covering absolute x in [x0, x0 + w).
+
+    Coordinates handed to it are panorama-absolute and anything outside the
+    window is *clipped*, not wrapped.  That is what lets one tower be drawn
+    into two adjacent spans and come out identical in both: its pixels depend
+    on the tower alone, never on which span is being rendered.
+    """
+
+    def __init__(self, x0, w, h, fill=CLEAR):
+        self.x0 = x0
+        self.w = w
+        self.h = h
+        self.px = [[fill] * w for _ in range(h)]
+
+    def set(self, x, y, c):
+        i = x - self.x0
+        if 0 <= i < self.w and 0 <= y < self.h:
+            self.px[y][i] = c
+
+    def rect(self, x, y, w, h, c):
+        i0 = max(0, x - self.x0)
+        i1 = min(self.w, x - self.x0 + w)
+        if i1 <= i0:
+            return
+        run = [c] * (i1 - i0)
+        for j in range(max(0, y), min(self.h, y + h)):
+            self.px[j][i0:i1] = run
+
+    def frame(self, x, y, w, h, c):
+        self.rect(x, y, w, 1, c)
+        self.rect(x, y + h - 1, w, 1, c)
+        self.rect(x, y, 1, h, c)
+        self.rect(x + w - 1, y, 1, h, c)
+
+
+# ------------------------------------------------------------------ prng ---
+# The procedural foreground has to produce the same tower from the same slot
+# index every time, on the watch and here, so it cannot use random.Random.
+# Splitmix32 is four lines of integer C and is seeded per slot, which is what
+# makes a slot renderable on its own.
+#
+# The generators below only ever ask an rng for these four things, so the
+# legacy foreground can go on using random.Random through SysRng and the two
+# paths keep sharing _tower().
+class Splitmix32(object):
+    MASK = 0xFFFFFFFF
+
+    def __init__(self, seed, index=0):
+        self.state = (seed ^ (index * 2654435761)) & self.MASK
+
+    def next(self):
+        self.state = (self.state + 0x9E3779B9) & self.MASK
+        z = self.state
+        z = ((z ^ (z >> 16)) * 0x21F0AAAD) & self.MASK
+        z = ((z ^ (z >> 15)) * 0x735A2D97) & self.MASK
+        return z ^ (z >> 15)
+
+    def below(self, n):
+        return self.next() % n
+
+    def between(self, lo, hi):
+        return lo + self.next() % (hi - lo + 1)
+
+    def chance(self, percent):
+        return self.next() % 100 < percent
+
+    def pick(self, seq):
+        return seq[self.next() % len(seq)]
+
+
+class SysRng(object):
+    """The same four operations on random.Random, for the legacy panorama.
+
+    `below` and `chance` are spelled so they agree exactly with the
+    `random() < 0.55` tests this replaced, which keeps the pre-existing
+    artwork byte-identical.
+    """
+
+    def __init__(self, seed):
+        self.r = random.Random(seed)
+
+    def below(self, n):
+        return int(self.r.random() * n)
+
+    def between(self, lo, hi):
+        return self.r.randint(lo, hi)
+
+    def chance(self, percent):
+        return self.r.random() < percent / 100.0
+
+    def pick(self, seq):
+        return self.r.choice(seq)
 
 
 # ------------------------------------------------------------- dithering ---
@@ -429,7 +546,7 @@ def _ridge_profile(rnd):
     return profile
 
 
-def gen_background():
+def background_canvas():
     c = Canvas(L.BG_W, L.BG_H)
     rnd = random.Random(20260908)
     ridge = _ridge_profile(rnd)
@@ -444,7 +561,11 @@ def gen_background():
         for j in range(1, max(0, step) + 1):
             c.set(x, top - j, RIDGE_CREST)
 
-    c.slice_tiles("bg", L.BG_TILES)
+    return c
+
+
+def gen_background():
+    background_canvas().slice_tiles("bg", L.BG_TILES)
 
 
 # =========================================================== foreground ====
@@ -467,49 +588,64 @@ def _tower(c, x, w, top, body, rnd):
                     d["win_step"]):
         for wx in range(x + d["win_left"], x + w - d["win_right"],
                         d["win_pitch"]):
-            if rnd.random() < 0.55:
+            if rnd.chance(55):
                 c.rect(wx, wy, d["win_w"], d["win_h"],
-                       rnd.choice(WINDOW_COLOURS))
+                       rnd.pick(WINDOW_COLOURS))
 
     # Roof furniture.
-    roll = rnd.random()
-    if roll < 0.35:
+    roll = rnd.below(100)
+    if roll < 35:
         mast = x + w // 2
-        c.rect(mast, top - rnd.randint(*d["mast_rise"]), 1, d["mast_h"], edge)
+        c.rect(mast, top - rnd.between(*d["mast_rise"]), 1, d["mast_h"], edge)
         c.set(mast, top - d["mast_tip"], MAGENTA)
-    elif roll < 0.6:
+    elif roll < 60:
         tw = max(d["box_min"], w // 3)
         c.rect(x + (w - tw) // 2, top - d["box_h"], tw, d["box_h"], body)
         c.rect(x + (w - tw) // 2, top - d["box_h"] - d["box_cap"], tw,
                d["box_cap"], DKGREY)
 
     # A vertical neon sign on some facades.
-    if w >= d["neon_min_w"] and rnd.random() < 0.3:
+    if w >= d["neon_min_w"] and rnd.chance(30):
         sx = x + w - d["neon_inset"]
-        sy = top + rnd.randint(*d["neon_drop"])
+        sy = top + rnd.between(*d["neon_drop"])
         c.rect(sx, sy, d["neon_w"], d["neon_h"], MAGENTA)
         c.frame(sx, sy, d["neon_w"], d["neon_h"], edge)
 
 
-def gen_foreground():
+def _lamp(c, lx):
+    d = L.deco
+    c.rect(lx, L.FG_GROUND - d["lamp_h"], 2, d["lamp_h"], DKGREY)
+    c.rect(lx - d["arm_dx"], L.FG_GROUND - d["lamp_h"] - d["arm_h"],
+           d["arm_w"], d["arm_h"], DKGREY)
+    c.rect(lx - d["glow_dx"], L.FG_GROUND - d["lamp_h"], d["glow_w"],
+           d["glow_h"], AMBER)
+
+
+def legacy_foreground():
+    """The authored panorama: towers packed left to right in one pass.
+
+    Kept for comparison against the procedural version -- it cannot be
+    rendered a tile at a time, because `x` accumulates across the whole
+    panorama and every tower depends on all the towers before it.
+    """
     d = L.deco
     c = Canvas(L.FG_W, L.FG_H)
-    rnd = random.Random(776211)
+    rnd = SysRng(776211)
 
     x = 0
     while x < L.FG_W:
-        w = rnd.randint(*d["tower_w"])
+        w = rnd.between(*d["tower_w"])
         if x + w > L.FG_W:                    # last block closes the loop
             w = L.FG_W - x
             if w < 18:
                 c.rect(x, L.FG_STUB_TOP, w, L.FG_GROUND - L.FG_STUB_TOP, NAVY)
                 break
-        top = (rnd.randint(*L.FG_TOP_LANDMARK) if rnd.random() < 0.2
-               else rnd.randint(*L.FG_TOP_COMMON))
+        top = (rnd.between(*L.FG_TOP_LANDMARK) if rnd.chance(20)
+               else rnd.between(*L.FG_TOP_COMMON))
         # Near buildings are darker than the distant land, which keeps the
         # ridge line reading as depth rather than more city.
-        _tower(c, x, w, top, NAVY if rnd.random() < 0.65 else BLACK, rnd)
-        x += w + rnd.randint(0, 3)
+        _tower(c, x, w, top, NAVY if rnd.chance(65) else BLACK, rnd)
+        x += w + rnd.between(0, 3)
 
     # Street: sidewalk, asphalt, dashed centre line.
     c.rect(0, L.FG_GROUND, L.FG_W, d["kerb_h"], DKGREY)
@@ -519,15 +655,122 @@ def gen_foreground():
     for dx in range(0, L.FG_W, d["dash_step"]):
         c.rect(dx, L.FG_LANE_MARK, d["dash_w"], d["dash_h"], GREY)
 
-    # Street lamps, spaced along the sidewalk.
     for lx in range(d["lamp_start"], L.FG_W, d["lamp_step"]):
-        c.rect(lx, L.FG_GROUND - d["lamp_h"], 2, d["lamp_h"], DKGREY)
-        c.rect(lx - d["arm_dx"], L.FG_GROUND - d["lamp_h"] - d["arm_h"],
-               d["arm_w"], d["arm_h"], DKGREY)
-        c.rect(lx - d["glow_dx"], L.FG_GROUND - d["lamp_h"], d["glow_w"],
-               d["glow_h"], AMBER)
+        _lamp(c, lx)
 
-    c.slice_tiles("fg", L.FG_TILES)
+    return c
+
+
+# ------------------------------------------------- procedural foreground ---
+# The same scene, rebuilt so that any horizontal span of it can be drawn on
+# its own.  That is the whole point: the watch can then generate a tile into a
+# blank bitmap when the scroll reaches it, instead of loading one of eight
+# stored 11-30KB images, and the panorama can be far longer than the resource
+# pack could ever hold.
+#
+# Two properties make it work, and tests/test_billboard_art.py checks both:
+#
+#   * every feature is addressed by an *index*, and everything about it comes
+#     from that index alone.  A tower straddling a tile boundary is drawn once
+#     as the right-hand tile's overhang and again as the left-hand tile's, and
+#     both come out identical because neither render knows which tile it is.
+#
+#   * indices run over all of Z.  Index i maps to cell i mod FG_SLOTS of turn
+#     i // FG_SLOTS, so the panorama repeats exactly at FG_W with no seam case
+#     -- tile 0 simply draws the negative-index towers hanging over from the
+#     end of the previous turn.
+#
+# Note that C's / and % truncate toward zero where Python's floor, so the
+# port has to spell the floor division out; _floor_div marks every place that
+# matters.
+FG_SEED = 776211
+
+
+def _floor_div(a, b):
+    """Floor division, called out because C's `/` is not this for a < 0."""
+    return a // b
+
+
+def _cell_x(index, count):
+    """Absolute x of periodic feature `index`, for any index in Z."""
+    k = index % count                      # floor-mod: 0 <= k < count
+    return _floor_div(index - k, count) * L.FG_W + k * L.FG_W // count
+
+
+def _cells_touching(count, x0, x1, reach):
+    """Indices whose cell origin lands in [x0 - reach, x1), plus a margin.
+
+    Cell origins are monotone in the index, so the bounds only have to be
+    conservative; anything drawn outside the span is clipped away.
+    """
+    lo = _floor_div((x0 - reach) * count, L.FG_W) - 1
+    hi = _floor_div(x1 * count, L.FG_W) + 1
+    return range(lo, hi + 1)
+
+
+def fg_slot(index):
+    """Everything about tower slot `index`, from the index alone.
+
+    The order the values are drawn in is part of the format: the C has to ask
+    for them in exactly this order, including evaluating the landmark test
+    before the height it selects.
+    """
+    d = L.deco
+    k = index % L.FG_SLOTS
+    rng = Splitmix32(FG_SEED, k)
+
+    x = _cell_x(index, L.FG_SLOTS) + rng.below(d["tower_jitter"] + 1)
+    w = rng.between(*d["tower_w"])
+    top = (rng.between(*L.FG_TOP_LANDMARK) if rng.chance(20)
+           else rng.between(*L.FG_TOP_COMMON))
+    body = NAVY if rng.chance(65) else BLACK
+    return x, w, top, body, rng
+
+
+def foreground_span(x0, w):
+    """Draws panorama x in [x0, x0 + w) into a standalone canvas.
+
+    This is the function the C port becomes: give it a blank tile-sized bitmap
+    and the tile's absolute x, and it fills it.
+    """
+    d = L.deco
+    c = SpanCanvas(x0, w, L.FG_H)
+
+    # Ascending index, so where two towers overlap the right-hand one wins --
+    # and wins the same way in whichever span it is drawn.
+    for i in _cells_touching(L.FG_SLOTS, x0, x0 + w, L.FG_SLOT_REACH):
+        x, tw, top, body, rng = fg_slot(i)
+        if x >= x0 + w or x + tw <= x0:
+            continue          # no rng to skip past: the slot owns its stream
+        _tower(c, x, tw, top, body, rng)
+
+    # Street: sidewalk, asphalt, dashed centre line.
+    c.rect(x0, L.FG_GROUND, w, d["kerb_h"], DKGREY)
+    c.rect(x0, L.FG_GROUND + d["kerb_line"], w, d["kerb_line_h"], BLACK)
+    c.rect(x0, L.FG_GROUND + d["kerb_h"], w,
+           L.FG_H - L.FG_GROUND - d["kerb_h"], BLACK)
+    for i in _cells_touching(L.FG_DASHES, x0, x0 + w, d["dash_w"]):
+        c.rect(_cell_x(i, L.FG_DASHES), L.FG_LANE_MARK, d["dash_w"],
+               d["dash_h"], GREY)
+
+    # Street lamps, spaced along the sidewalk.
+    reach = d["lamp_start"] + d["arm_w"] + d["arm_dx"]
+    for i in _cells_touching(L.FG_LAMPS, x0, x0 + w, reach):
+        _lamp(c, _cell_x(i, L.FG_LAMPS) + d["lamp_start"])
+
+    return c
+
+
+def write_foreground_tiles():
+    """Writes the panorama out as tiles, the way it used to ship.
+
+    Nothing builds against these any more -- src/c/city_gen.c draws the
+    foreground on the watch -- but rendering them is still the quickest way
+    to look at what a change here did.
+    """
+    for t in range(L.FG_TILES):
+        write_png(art_path("fg_%d" % t),
+                  foreground_span(t * L.SCREEN_W, L.SCREEN_W))
 
 
 # ============================================================ billboard ====
@@ -798,8 +1041,7 @@ def report():
     """Prints each layer's colour count; over 16 breaks SmallestPalette."""
     print("%s: sky, %d unique colours" %
           (L.name, len(_read_colours(art_path("sky")))))
-    for prefix, count in (("bg", L.BG_TILES), ("fg", L.FG_TILES),
-                          ("bb", L.BB_TILES)):
+    for prefix, count in (("bg", L.BG_TILES), ("bb", L.BB_TILES)):
         colours = set()
         for t in range(count):
             colours |= _read_colours(art_path("%s_%d" % (prefix, t)))
@@ -808,14 +1050,157 @@ def report():
                "  *** TOO MANY FOR A PALETTE ***" if len(colours) > 16 else ""))
 
 
+def verify_spans(trials=24, seed=99):
+    """Checks that a span depends only on where it is, not on how it was cut.
+
+    The panorama assembled from the tiles the watchface would ship is the
+    reference; spans rendered at arbitrary offsets -- negative, straddling
+    every seam, past the wrap -- have to agree with it pixel for pixel.  A
+    failure here is exactly the bug that would show as a tower changing shape
+    as it crosses a tile boundary on the watch.
+    """
+    reference = [[] for _ in range(L.FG_H)]
+    for t in range(L.FG_TILES):
+        tile = foreground_span(t * L.SCREEN_W, L.SCREEN_W)
+        for y in range(L.FG_H):
+            reference[y].extend(tile.px[y])
+
+    rnd = random.Random(seed)
+    cases = [("wide", 0, L.FG_W)]
+    for x0 in (-L.FG_W, -L.SCREEN_W, -1, 1, L.SCREEN_W - 1, L.FG_W - 1, L.FG_W,
+               L.FG_W + 7, 2 * L.FG_W + 3):
+        cases.append(("edge", x0, L.SCREEN_W))
+    for _ in range(trials):
+        cases.append(("random", rnd.randrange(-2 * L.FG_W, 3 * L.FG_W),
+                      rnd.randint(1, L.SCREEN_W)))
+    # Every tile seam, from both sides, at a width that straddles it.
+    for t in range(L.FG_TILES):
+        cases.append(("seam", t * L.SCREEN_W - L.SCREEN_W // 2, L.SCREEN_W))
+
+    failures = 0
+    for kind, x0, w in cases:
+        span = foreground_span(x0, w)
+        for y in range(L.FG_H):
+            row = span.px[y]
+            for i in range(w):
+                if row[i] != reference[y][(x0 + i) % L.FG_W]:
+                    print("  FAIL %s span x0=%d w=%d: pixel (%d,%d) "
+                          "abs x=%d, %r != %r" %
+                          (kind, x0, w, i, y, x0 + i, row[i],
+                           reference[y][(x0 + i) % L.FG_W]))
+                    failures += 1
+                    break
+            if failures:
+                break
+        if failures:
+            break
+    print("%s: %d spans checked, %s" %
+          (L.name, len(cases), "OK" if not failures else "FAILED"))
+    return failures
+
+
+# ------------------------------------------------------------- previews ----
+# Not artwork: a wide PNG of the whole scrolling scene, composited the way the
+# watchface stacks it, so the skyline can be judged before any C is written.
+PREVIEW_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           "..", "build", "preview")
+
+
+def _compose(dst, src, x, y):
+    for j in range(src.h):
+        if not 0 <= y + j < dst.h:
+            continue
+        row = src.px[j]
+        out = dst.px[y + j]
+        for i in range(src.w):
+            c = row[i]
+            if c[3]:
+                out[(x + i) % dst.w] = c
+
+
+def write_preview(name, fg):
+    c = Canvas(fg.w, L.SCREEN_H, HORIZON)
+
+    sky = Canvas(fg.w, L.SKY_H)
+    dither_gradient(sky, scale_stops(SKY_STOPS, L.SKY_H))
+    _compose(c, sky, 0, 0)
+
+    ridge = background_canvas()
+    for x in range(0, fg.w, ridge.w):
+        _compose(c, ridge, x, L.BG_Y)
+
+    _compose(c, fg, 0, L.FG_Y)
+
+    if not os.path.isdir(PREVIEW_DIR):
+        os.makedirs(PREVIEW_DIR)
+    path = os.path.join(PREVIEW_DIR, "%s~%s.png" % (name, L.name))
+    write_png(path, c)
+    print("%s: %dx%d" % (os.path.relpath(path), c.w, c.h))
+
+
 def main():
+    import argparse
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--platform", action="append", choices=sorted(PLATFORMS),
+                    help="restrict to one platform; repeatable")
+    ap.add_argument("--fg-tiles", type=int, metavar="N",
+                    help="override the foreground panorama length, to see how "
+                         "much variety a longer one buys")
+    ap.add_argument("--tower-pitch", type=int, metavar="PX",
+                    help="override the slot pitch, to trade gaps between "
+                         "towers against overlap")
+    ap.add_argument("--write-tiles", action="store_true",
+                    help="write the cityscape out as tiles the way it used "
+                         "to ship, for diffing against an earlier run")
+    ap.add_argument("--verify", action="store_true",
+                    help="check span independence; writes nothing")
+    ap.add_argument("--preview", action="store_true",
+                    help="write wide previews of the scene to build/preview, "
+                         "procedural and legacy, instead of artwork")
+    args = ap.parse_args()
+
+    platforms = args.platform or sorted(PLATFORMS)
+    if args.fg_tiles or args.tower_pitch:
+        for name in platforms:
+            layout = PLATFORMS[name]
+            deco = dict(layout.deco)
+            if args.tower_pitch:
+                deco["tower_pitch"] = args.tower_pitch
+            PLATFORMS[name] = Layout(layout.name, layout.SCREEN_W,
+                                     layout.SCREEN_H, deco,
+                                     fg_tiles=args.fg_tiles or layout.FG_TILES)
+
+    if args.verify:
+        failures = 0
+        for platform in platforms:
+            select(platform)
+            failures += verify_spans()
+        raise SystemExit(1 if failures else 0)
+
+    if args.write_tiles:
+        if not os.path.isdir(OUT_DIR):
+            os.makedirs(OUT_DIR)
+        for platform in platforms:
+            select(platform)
+            write_foreground_tiles()
+        return
+
+    if args.preview:
+        # A non-default panorama length gets its own filename, so a long run
+        # does not clobber the one the shipped tile count produced.
+        tag = "" if not args.fg_tiles else "-%dtiles" % args.fg_tiles
+        for platform in platforms:
+            select(platform)
+            write_preview("fg-procedural" + tag, foreground_span(0, L.FG_W))
+            write_preview("fg-legacy" + tag, legacy_foreground())
+        return
+
     if not os.path.isdir(OUT_DIR):
         os.makedirs(OUT_DIR)
-    for platform in PLATFORMS:
+    for platform in platforms:
         select(platform)
         gen_sky()
         gen_background()
-        gen_foreground()
         gen_billboard()
         report()
 

@@ -15,6 +15,14 @@ void city_layer_init(CityLayer *layer, const uint32_t *ids, uint8_t count,
   layer->slot_tile[1] = -1;
 }
 
+void city_layer_init_generated(CityLayer *layer, CityTileGen generate,
+                               GColor *palette, uint8_t count, int16_t tile_w,
+                               int16_t height, int16_t y, int16_t speed) {
+  city_layer_init(layer, NULL, count, tile_w, height, y, speed);
+  layer->generate = generate;
+  layer->palette = palette;
+}
+
 void city_layer_deinit(CityLayer *layer) {
   for (int i = 0; i < 2; i++) {
     if (layer->slot[i]) {
@@ -67,9 +75,31 @@ void city_layer_advance(CityLayer *layer) {
   }
 }
 
+// Puts `tile` in slot `s`, by loading it or by generating it.  A generated
+// slot keeps its bitmap and is refilled, so the cost of a boundary crossing
+// is a tile's worth of drawing in place of a flash read and decode.
+static void fill_slot(CityLayer *layer, int s, int tile) {
+  if (layer->generate) {
+    if (!layer->slot[s]) {
+      layer->slot[s] = gbitmap_create_blank_with_palette(
+          GSize(layer->tile_w, layer->height), GBitmapFormat4BitPalette,
+          layer->palette, false);
+    }
+    if (layer->slot[s]) {
+      layer->generate(layer->slot[s], (int32_t)tile * layer->tile_w);
+    }
+  } else {
+    if (layer->slot[s]) {
+      gbitmap_destroy(layer->slot[s]);
+    }
+    layer->slot[s] = gbitmap_create_with_resource(layer->ids[tile]);
+  }
+  layer->slot_tile[s] = layer->slot[s] ? (int8_t)tile : -1;
+}
+
 // Points the two slots at the requested tiles, reusing whatever is already
-// loaded.  Scrolling one tile forward reuses the old right-hand tile, so a
-// boundary crossing costs a single resource load.
+// there.  Scrolling one tile forward reuses the old right-hand tile, so a
+// boundary crossing costs a single fill.
 static void bind_tiles(CityLayer *layer, int left, int right) {
   if (left == right) {
     // A single-tile panorama repeats inside one viewport, so both halves of
@@ -80,11 +110,7 @@ static void bind_tiles(CityLayer *layer, int left, int right) {
         return;
       }
     }
-    if (layer->slot[0]) {
-      gbitmap_destroy(layer->slot[0]);
-    }
-    layer->slot[0] = gbitmap_create_with_resource(layer->ids[left]);
-    layer->slot_tile[0] = layer->slot[0] ? left : -1;
+    fill_slot(layer, 0, left);
     layer->bind[0] = layer->bind[1] = 0;
     return;
   }
@@ -110,12 +136,7 @@ static void bind_tiles(CityLayer *layer, int left, int right) {
     const int s = taken[0] ? 1 : 0;
     taken[s] = true;
     layer->bind[w] = s;
-
-    if (layer->slot[s]) {
-      gbitmap_destroy(layer->slot[s]);
-    }
-    layer->slot[s] = gbitmap_create_with_resource(layer->ids[wanted[w]]);
-    layer->slot_tile[s] = layer->slot[s] ? wanted[w] : -1;
+    fill_slot(layer, s, wanted[w]);
   }
 }
 

@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 """Check the generated artwork against the geometry the watchface assumes."""
 import importlib.util
+import json
 from pathlib import Path
 import struct
 import tempfile
@@ -101,7 +102,7 @@ def palettised_size(path):
 
 class ResourceBudgetTest(unittest.TestCase):
     def test_pack_fits_the_appstore_limit(self):
-        """gabbro carries six foreground tiles because eight would not fit."""
+        """The stored artwork, which is everything but the cityscape."""
         for name, L in art.PLATFORMS.items():
             with self.subTest(platform=name):
                 images = ROOT / "resources/images"
@@ -110,12 +111,22 @@ class ResourceBudgetTest(unittest.TestCase):
                 for i in range(L.BG_TILES):
                     total += palettised_size(
                         images / ("bg_%d~%s.png" % (i, name)))
-                for i in range(L.FG_TILES):
-                    total += palettised_size(
-                        images / ("fg_%d~%s.png" % (i, name)))
                 # Pbi headers and palettes add a couple of percent on top of
                 # the pixel data, so leave the tail of the budget alone.
                 self.assertLess(total, APPSTORE_RESOURCE_LIMIT * 95 // 100)
+
+    def test_the_foreground_is_not_a_resource(self):
+        """src/c/city_gen.c draws it, so nothing should be shipping it.
+
+        Putting the tiles back would quietly cost four fifths of the pack
+        again, and on gabbro it is what the six-tile limit used to be about.
+        """
+        package = json.loads((ROOT / "package.json").read_text())
+        names = [entry["name"]
+                 for entry in package["pebble"]["resources"]["media"]]
+        self.assertEqual([n for n in names if n.startswith("IMG_FG")], [])
+        self.assertEqual(
+            sorted((ROOT / "resources/images").glob("fg_*.png")), [])
 
 
 class BillboardArtTest(unittest.TestCase):

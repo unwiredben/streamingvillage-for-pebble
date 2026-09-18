@@ -6,6 +6,7 @@
 #include "../src/c/main.c"
 #undef main
 #include "../src/c/city_layer.c"
+#include "../src/c/city_gen.c"
 #undef fprintf
 
 #define CHECK(condition) do { \
@@ -56,6 +57,15 @@ GBitmap *gbitmap_create_with_resource(uint32_t id) {
   CHECK(id == RESOURCE_ID_IMG_BB_0);
   return (GBitmap *)&bitmap_token;
 }
+// The scene is never drawn in these scenarios, so the generated foreground's
+// bitmap calls are only here to satisfy the linker.
+GBitmap *gbitmap_create_blank_with_palette(GSize size, GBitmapFormat format,
+                                           GColor *palette,
+                                           bool free_on_destroy) {
+  return (GBitmap *)&bitmap_token;
+}
+uint8_t *gbitmap_get_data(const GBitmap *bitmap) { return NULL; }
+uint16_t gbitmap_get_bytes_per_row(const GBitmap *bitmap) { return 0; }
 void gbitmap_destroy(GBitmap *bitmap) { CHECK(bitmap == (GBitmap *)&bitmap_token); }
 GRect gbitmap_get_bounds(const GBitmap *bitmap) {
   return GRect(0, 0, BB_FRAME_W, BB_H);
@@ -95,7 +105,8 @@ size_t strftime(char *text, size_t size, const char *format, const struct tm *ti
 int main(int argc, char **argv) {
   CHECK(argc == 2);
   city_layer_init(&s_background, s_bg_ids, BG_TILES, MIN_TILE_W, BG_H, BG_Y, BG_SPEED);
-  city_layer_init(&s_foreground, s_fg_ids, FG_TILES, MIN_TILE_W, FG_H, FG_Y, FG_SPEED);
+  city_layer_init_generated(&s_foreground, foreground_tile, city_gen_palette(),
+                            FG_TILES, MIN_TILE_W, FG_H, FG_Y, FG_SPEED);
   city_layer_init(&s_billboard, s_bb_ids, BB_TILES, BB_TILE_W, BB_H, BB_Y, BB_SPEED);
   city_layer_set_pause(&s_billboard, BB_CLEAR_AT, BB_PAUSE_MS, FRAME_MS);
   s_billboard.offset = SUBPIX(BB_REST_PX);

@@ -38,7 +38,7 @@ layout for.
 |---|---|---|---|
 | sky | 1 | static | the dithered sunset gradient, opaque |
 | background | 6 | ~3.75 px/s | mountain ridge with a rim-lit crest |
-| foreground | 8, or 6 on gabbro | ~15 px/s | near towers with lit windows, street lamps, road |
+| foreground | 32, generated | ~15 px/s | near towers with lit windows, street lamps, road |
 | billboard | 1 | ~30 px/s | the billboard that carries the time |
 
 And where each one sits:
@@ -50,12 +50,13 @@ And where each one sits:
 | foreground | 200x200 at y=28 | 144x147 at y=21 | 180x157 at y=23 | 260x228 at y=32 |
 | billboard | 120x122 at y=134 | 86x89 at y=98 | 108x96 at y=105 | 156x139 at y=152 |
 | billboard repeat | 320px | 230px | 288px | 416px |
-| foreground loop | 1600px | 1152px | 1440px | 1560px |
+| foreground loop | 6400px | 4608px | 5760px | 8320px |
 
 Every platform scrolls at the same physical speed; what changes is the
-panorama width. gabbro is the one platform that does not use eight foreground
-tiles — see [Memory](#memory). See also
-[Four sizes, one layout](#four-sizes-one-layout).
+panorama width. The foreground is not stored artwork — the watch draws each
+tile as the scroll reaches it, which is what lets the panorama be 32 tiles
+wide on every platform; see [The generated cityscape](#the-generated-cityscape).
+See also [Four sizes, one layout](#four-sizes-one-layout).
 
 The background is a shallow band and the towers are tall, so the sunset reads
 as a thin strip above the horizon rather than half the display. Most towers
@@ -67,13 +68,13 @@ them are mid purple, and the near towers are navy or black against it. The
 billboard sits just over the top of the road, in front of the street, on a
 single centre pole that runs off the bottom of the display.
 
-The background and foreground are authored as seamless panoramas and sliced
-into tiles. Every logical tile is at least as wide as the display, so any
+The background is authored as a seamless panorama and sliced into tiles;
+the foreground is generated a tile at a time on the watch. Every logical tile is at least as wide as the display, so any
 viewport overlaps at most two adjacent tiles. Images entirely outside
 the viewport are skipped; partially visible images are clipped by the graphics
 context. Only two bitmaps per layer are ever resident. Scrolling one tile forward
 reuses the previous right-hand tile, so crossing a boundary costs a single
-resource load. The billboard panorama is a single tile, so both halves of its
+tile — loaded for the background, drawn for the foreground. The billboard panorama is a single tile, so both halves of its
 draw share the one bitmap. Its stored image omits the transparent margins on
 each side: it is drawn at a half-display inset within the unchanged logical tile.
 
@@ -177,7 +178,7 @@ byte-aligned, so a 4-bit tile costs `ceil(w/2)` bytes per row and a 2-bit one
                 emery       basalt       chalk      gabbro
     sky         1 x  8,800  1 x  4,608  1 x  6,210  1 x 13,000  (4-bit, 9 colours)
     background  2 x  2,000  2 x  1,044  2 x  1,395  2 x  2,925  (2-bit, 3 colours)
-    foreground  2 x 20,000  2 x 10,584  2 x 14,130  2 x 29,640  (4-bit, 9 colours)
+    foreground  2 x 20,000  2 x 10,584  2 x 14,130  2 x 29,640  (4-bit, 9 colours, generated)
     billboard   1 x  7,320  1 x  3,827  1 x  5,184  1 x 10,842  (4-bit, 6 colours)
                   --------    --------    --------    --------
                     60,120      31,691      42,444      88,972
@@ -200,24 +201,71 @@ bit depth each one actually needs, which is how the mountains come out at 2
 bits. The build fails loudly if a layer ever exceeds 16, and
 `tools/gen_art.py` prints each layer's colour count.
 
+The foreground tiles are generated rather than stored, so they cost heap but
+no flash — the two resident tiles are the same size either way.
+
 Resources are stored as `pbi` rather than `png`. PNG resources would be much
 smaller on flash — the dithered sky especially — but decoding one needs a
 transient buffer on top of everything already resident, and the tiles are
-loaded mid-animation. Uncompressed, the packs come to 192,751 bytes on emery,
-104,002 on basalt, 137,435 on chalk and 223,807 on gabbro, each against a
-256KB per-platform limit.
+loaded mid-animation. Uncompressed, the packs come to 32,527 bytes on emery,
+19,106 on basalt, 24,171 on chalk and 45,799 on gabbro, each against a 256KB
+per-platform limit. `tests/test_billboard_art.py` asserts every platform's
+pack stays inside the budget, and that the foreground has not crept back into
+it.
 
-That limit is what sets gabbro's foreground panorama at six tiles rather than
-eight. A 260x228 tile costs 29,640 bytes, so eight of them would be 237KB of
-the 256KB budget on their own and the pack would come to roughly 283KB —
-buildable and sideloadable, since the hard limit is 1024KB, but over the
-ceiling the appstore enforces. Six tiles is a 1560px loop, about 104 seconds
-at 15 px/s, and nothing on the watch notices: `city_layer` reads its tile
-count from the array it is handed. `package.json` keeps `IMG_FG_6` and
-`IMG_FG_7` off gabbro with a per-resource `targetPlatforms`, so those two
-bitmaps are not in its pack at all, and `main.c` sizes `s_fg_ids` to match.
-`tests/test_billboard_art.py` asserts every platform's pack stays inside the
-budget.
+## The generated cityscape
+
+The eight stored foreground tiles used to be 80-85% of every platform's
+resource pack: 163KB of emery's 193KB, 180KB of gabbro's 224KB. That is what
+capped gabbro's panorama at six tiles — a 260x228 tile costs 29,640 bytes, so
+eight would have been 237KB of the 256KB the appstore allows, before anything
+else went in the pack.
+
+`src/c/city_gen.c` draws them instead, and the whole pack drops to 19-46KB.
+The `.pbw` went from 678KB to 145KB, and the panorama went from eight tiles
+to 32 on every platform, the old gabbro special case with it.
+
+What makes a tile drawable on its own is that nothing accumulates along the
+panorama. Towers sit in `FG_SLOTS` evenly spaced cells, and everything about
+the tower in cell *n* — where in the cell it stands, how wide and tall it is,
+which windows are lit, what sits on its roof — comes from *n* alone, by way of
+a Splitmix32 seeded from it. So a tower straddling a tile boundary is drawn
+twice, once as one tile's overhang and once as the next tile's, and comes out
+identical both times because neither drawing knows which tile it is in. Cell
+indices run over all of the integers: index *i* is cell *i* mod `FG_SLOTS` of
+turn *i* / `FG_SLOTS`, so the panorama wraps with no seam case at all — tile 0
+simply draws the negative-index towers hanging over from the previous turn.
+
+Because the panorama is fixed and the whole of it is reachable, the watchface
+starts at a random point in it rather than at tile 0, so the same stretch of
+city is not the first thing on screen every time the face is loaded. That is a
+random *offset*, not a random city: changing the seed would change what the
+towers look like, and the generator is only checkable because the seed is
+pinned. The billboard is left where it is — its rest position is where the
+clock ends up.
+
+The street is periodic rather than indexed by slot, but it has the same
+constraint, and its authored spacing divides the panorama width on basalt
+alone. Dashes and lamps are therefore counted out across the panorama instead
+of stepping by a fixed pixel pitch, which also fixed a phase jump the stored
+artwork had at the wrap on the other three.
+
+Generating a tile costs about 1.8x its own size in pixel writes — 19KB over
+788 fills on basalt, 53KB over 1,660 on gabbro — and happens once every
+192 frames on basalt to 347 on gabbro, which at 20fps is once every 10 to 17
+seconds. Measured on emery hardware, a 200x200 tile takes **1.09 ms** (64
+back-to-back generations in 70ms, repeatably) against a 50 ms frame, so a
+crossing spends about 2% of the frame it lands in. It replaces a flash read
+and decode of a bitmap of exactly the same size, on that same frame, so the
+frame is no busier than it was when the tiles were stored.
+
+Nothing describes the cityscape any more except the code that draws it, so
+`tools/gen_art.py` keeps the same generator in Python — it is where the
+artwork was authored, and it still draws the appstore icons from the same
+shapes — and `tests/test_city_gen.py` renders both and compares every pixel,
+on every platform, for all 32 tiles plus a set of deliberately misaligned
+spans. `python3 tools/gen_art.py --preview` writes the whole scene out as one
+wide PNG to look at, and `--verify` checks span independence without the C.
 
 ## Four sizes, one layout
 
@@ -238,8 +286,8 @@ the display, a billboard tile being one display plus one board — are asserted
 in `tests/test_billboard_art.py`, so a drift between generator and watchface
 fails a test rather than showing up as a seam on the watch.
 
-Only three values genuinely differ per platform: the billboard's panel margin,
-the clock face, and — on gabbro alone — the foreground tile count. The system
+Only two values genuinely differ per platform: the billboard's panel margin
+and the clock face. The system
 fonts come in fixed sizes, so the digits step to the nearest one that clears
 the panel: `FONT_KEY_LECO_32_BOLD_NUMBERS` will not fit basalt's 32px panel or
 chalk's 34px one whatever its width, so both use
@@ -261,24 +309,29 @@ x 62..198 / y 165..214 on gabbro.
 ### Per-platform resources
 
 The four artwork sets share one set of resource names. `package.json` declares
-the bare `images/fg_0.png`, and the SDK's `find_most_specific_filename`
-resolves it to `fg_0~emery.png`, `fg_0~basalt.png`, `fg_0~chalk.png` or
-`fg_0~gabbro.png` from the platform's tags — so there is one media entry per
-image, one `RESOURCE_ID_IMG_FG_0`, and one id array in `main.c`.
+the bare `images/bg_0.png`, and the SDK's `find_most_specific_filename`
+resolves it to `bg_0~emery.png`, `bg_0~basalt.png`, `bg_0~chalk.png` or
+`bg_0~gabbro.png` from the platform's tags — so there is one media entry per
+image, one `RESOURCE_ID_IMG_BG_0`, and one id array in `main.c`.
 `menu_icon.png` is identical on all four and stays untagged.
 
 ## Artwork
 
-There are no hand-drawn assets. `tools/gen_art.py` generates the sky and every
-scrolling tile procedurally — 15 per platform, 13 on gabbro — for all four
-platforms in one pass (pure Python — it writes the PNGs itself, so no Pillow
-needed):
+There are no hand-drawn assets. `tools/gen_art.py` generates the sky, the
+mountain ridge and the billboard procedurally — 8 images per platform — for
+all four platforms in one pass (pure Python — it writes the PNGs itself, so no
+Pillow needed):
 
     python3 tools/gen_art.py
 
 It draws each layer onto a horizontally wrapping canvas, so shapes may straddle
 the seam and the panoramas loop cleanly. All colours are on Pebble's 64-colour
 grid.
+
+It also carries the cityscape generator, which is the one part that does not
+ship as artwork — `src/c/city_gen.c` draws that on the watch, and the Python
+is the reference the C is tested against. See
+[The generated cityscape](#the-generated-cityscape).
 
 Geometry lives in a `Layout` per platform, scaled from the emery reference the
 same way `main.c` scales its `#define`s. Decorative detail is *not* scaled and
@@ -288,6 +341,8 @@ disappears, and at 1.3x it looks sparse, so window pitch, lamp spacing, dash
 length and the like are chosen rather than computed. Because the scaling is
 the identity at 200x228, regenerating has to leave the emery PNGs
 byte-identical — that is the regression check for any change in this file.
+The cityscape is the exception: it is no longer written out, so
+`tests/test_city_gen.py` compares it against the C instead.
 
 ## Store animations
 
