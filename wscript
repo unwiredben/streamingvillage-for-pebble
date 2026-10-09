@@ -1,5 +1,10 @@
 # Copyright (c) 2026 Ben Combee
 # SPDX-License-Identifier: MIT
+import json
+import shutil
+
+from waflib import Logs
+
 top = '.'
 out = 'build'
 
@@ -10,6 +15,16 @@ def options(ctx):
 
 def configure(ctx):
     ctx.load('pebble_sdk')
+
+
+def copy_versioned_bundle(ctx):
+    with open(ctx.path.find_node('package.json').abspath()) as manifest:
+        package = json.load(manifest)
+    source = ctx.bldnode.make_node(ctx.env.BUNDLE_NAME).abspath()
+    filename = '{}-{}.pbw'.format(package['name'], package['version'])
+    destination = ctx.path.make_node(filename).abspath()
+    shutil.copyfile(source, destination)
+    Logs.info('Copied build bundle to {}'.format(filename))
 
 
 def build(ctx):
@@ -29,3 +44,4 @@ def build(ctx):
 
     ctx.set_group('bundle')
     ctx.pbl_bundle(binaries=binaries, js=[])
+    ctx.add_post_fun(copy_versioned_bundle)
