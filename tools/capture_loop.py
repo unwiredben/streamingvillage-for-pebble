@@ -36,6 +36,11 @@ Run from the project directory:
 
     tools/capture_loop.py                 # every target platform
     tools/capture_loop.py basalt chalk    # just these
+    tools/capture_loop.py --force-robot --headless --format apng
+    tools/capture_loop.py --force-robot --convert
+
+The robot option records a complete two-pass run, refreshes listing stills and
+rejects captured or encoded animations without the robot walking left to right.
 """
 
 import os
@@ -62,21 +67,28 @@ except ImportError:
     os.execv(interpreter, [interpreter, os.path.abspath(__file__)] + sys.argv[1:])
 
 import argparse
+from contextlib import contextmanager
+import datetime
+import json
+import queue
 import shutil
 import struct
 import subprocess
 import tempfile
 import time
+from uuid import UUID
+import zipfile
 
 from PIL import Image
 
 from libpebble2.communication.transports.qemu.protocol import QemuTap
+from libpebble2.services.appmessage import AppMessageService, Uint32
 
 from pebble_tool.commands.emucontrol import send_data_to_qemu
 from pebble_tool.commands.install import ToolAppInstaller
 from pebble_tool.commands.screenshot import ScreenshotCommand
 from pebble_tool.exceptions import ToolError
-from pebble_tool.sdk import get_sdk_persist_dir, sdk_manager, sdk_version
+from pebble_tool.sdk import emulator, sdk_version
 from pebble_tool.util import get_persist_dir
 from pebble_tool.util.wsl import maybe_apply_wsl_hacks
 
@@ -102,6 +114,68 @@ NOMINAL_PASS_SECONDS = {
     "gabbro": 15.85,
 }
 DEFAULT_PASS_SECONDS = 12.0
+
+
+def set_force_robot(pebble, app_uuid, enabled=True, attempts=20):
+    """Apply the launcher's session override and wait for the watch's ACK."""
+    service = AppMessageService(pebble)
+    replies = queue.Queue()
+    target = UUID(str(app_uuid))
+
+    def response(ok):
+        def received(transaction_id, target_uuid):
+            if target_uuid == target:
+                replies.put(ok)
+        return received
+
+    service.register_handler("ack", response(True))
+    service.register_handler("nack", response(False))
+    try:
+        # Key 1 is ForceRobot in package.json; the watch validates a uint32 bool.
+        # Installation can finish before the watch opens its inbox. Retry that
+        # transient NACK; never treat sending alone as a successful launch.
+        for attempt in range(attempts):
+            service.send_message(target, {1: Uint32(int(enabled))})
+            try:
+                if replies.get(timeout=0.5):
+                    return
+            except queue.Empty:
+                pass
+            if attempt + 1 < attempts:
+                time.sleep(0.1)
+        raise ToolError("Watch did not acknowledge the force-robot option after retries.")
+    finally:
+        service.shutdown()
+
+
+@contextmanager
+def isolated_emulator(headless=False):
+    """Keep captures separate from the user's running emulator and flash data."""
+    old_persist = emulator.get_sdk_persist_dir
+    old_registry = emulator.get_emulator_info_path
+    display_vars = ("SDL_VIDEODRIVER", "SDL_AUDIODRIVER", "SDL_RENDER_DRIVER")
+    old_env = {name: os.environ.get(name) for name in display_vars}
+    with tempfile.TemporaryDirectory(prefix="village-capture-") as state:
+        def persist(platform, version=None):
+            path = os.path.join(state, version or sdk_version(), platform)
+            os.makedirs(path, exist_ok=True)
+            return path
+
+        emulator.get_sdk_persist_dir = persist
+        emulator.get_emulator_info_path = lambda: os.path.join(state, "emulators.json")
+        if headless:
+            os.environ.update(SDL_VIDEODRIVER="dummy", SDL_AUDIODRIVER="dummy",
+                              SDL_RENDER_DRIVER="software")
+        try:
+            yield
+        finally:
+            emulator.get_sdk_persist_dir = old_persist
+            emulator.get_emulator_info_path = old_registry
+            for name, value in old_env.items():
+                if value is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = value
 
 # How much longer than one nominal pass to record.  Has to cover the drift while
 # staying inside the two passes the run actually lasts.
@@ -150,13 +224,15 @@ class GifCapture(ScreenshotCommand):
         self._verbosity = args.v  # normally set by BaseCommand.__call__, which we bypass
 
     def capture(self, platform_name, pbw_path, filename):
-        target_sdk = self.args.sdk or sdk_manager.get_current_sdk()
-        persist_dir = get_sdk_persist_dir(platform_name, target_sdk)
-        if os.path.exists(persist_dir):
-            shutil.rmtree(persist_dir)
+        with isolated_emulator(getattr(self.args, "headless", False)):
+            self._capture(platform_name, pbw_path, filename)
 
+    def _capture(self, platform_name, pbw_path, filename):
         pass_seconds = self.args.pass_seconds or NOMINAL_PASS_SECONDS.get(
             platform_name, DEFAULT_PASS_SECONDS)
+        force_robot = getattr(self.args, "force_robot", False)
+        passes = 2 if force_robot else 1
+        total_seconds = passes * pass_seconds
         pebble = None
         try:
             pebble = self._connect_emulator(platform_name, self.args.sdk)
@@ -165,13 +241,19 @@ class GifCapture(ScreenshotCommand):
             # freshly-booted watch; pebble-tool waits here too.
             time.sleep(5)
             ToolAppInstaller(pebble, pbw_path, quiet=True).install()
+            if force_robot:
+                with zipfile.ZipFile(pbw_path) as bundle:
+                    app_uuid = json.loads(bundle.read("appinfo.json"))["uuid"]
+                self._app_uuid = app_uuid
+                set_force_robot(pebble, app_uuid)
 
             monitor_port = getattr(pebble.transport, "qemu_monitor_port", None)
             if not monitor_port:
                 raise ToolError("QEMU monitor port not available; cannot capture frames.")
 
-            frames, fps = self._record(pebble, monitor_port, platform_name, pass_seconds)
-            frames = _trim_to_pass(frames, fps, pass_seconds)
+            frames, fps = self._record(pebble, monitor_port, platform_name,
+                                       pass_seconds, passes=passes)
+            frames = _trim_to_pass(frames, fps, pass_seconds, passes=passes)
             if self.args.frame_step > 1:
                 frames = frames[::self.args.frame_step]
             # Play the pass back over the time it takes on a watch rather than
@@ -179,7 +261,7 @@ class GifCapture(ScreenshotCommand):
             # FRAME_MS, so the capture is a few percent off real hardware.  This
             # also absorbs --frame-step, which drops frames without shortening
             # the pass.
-            playback_fps = len(frames) / pass_seconds
+            playback_fps = len(frames) / total_seconds
             if abs(playback_fps - fps) > 0.05 * fps:
                 print("  pacing playback at {:.1f} fps rather than the captured {:.1f} "
                       "to match hardware".format(playback_fps, fps))
@@ -187,7 +269,13 @@ class GifCapture(ScreenshotCommand):
             roundness = None if self.args.no_round_mask else ROUNDNESS.get(platform_name)
             if roundness:
                 frames = _mask_corners(frames, roundness)
-            _encode(frames, filename, pass_seconds, self.args.format)
+            if force_robot:
+                if not _has_robot(frames):
+                    raise ToolError("Capture rejected: no robot walking left to right.")
+                _save_listing_stills(frames, platform_name, os.path.dirname(filename))
+            _encode(frames, filename, total_seconds, self.args.format)
+            if force_robot:
+                _verify_robot_animation(filename, total_seconds)
         finally:
             self._close_pebble_connection(pebble)
             self.pebble = None
@@ -227,43 +315,61 @@ class GifCapture(ScreenshotCommand):
                 centre = None
                 if frame is not None:
                     peak = max(channel[1] for channel in frame.getextrema())
-                    centre = _panel_centre(frame, _billboard_band(frame.size[1]), peak * 0.55)
-                # The billboard is off-screen for two seconds of every pass, so
-                # an absent panel is motion, not rest.
-                if centre is not None and previous is not None and abs(centre - previous) < 0.5:
+                    centre = _panel_centre(frame, _billboard_band(frame.size[1]), peak * 0.85)
+                # Require the entire city to stop, with the clock visible.
+                pixels = frame.tobytes() if frame is not None else None
+                if centre is not None and previous is not None and pixels == previous:
                     stable += 1
                     if stable >= 2:
                         return
                 else:
                     stable = 0
-                previous = centre
+                previous = pixels
                 time.sleep(0.6)
             raise ToolError("Scene was still moving after {:.0f}s.".format(timeout))
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
-    def _record(self, pebble, monitor_port, platform_name, pass_seconds):
-        """Capture a little over one pass.  Returns the frames and their rate."""
+    def _record(self, pebble, monitor_port, platform_name, pass_seconds, passes=1):
+        """Capture the requested passes plus a margin; return frames and rate."""
         self._wait_for_rest(monitor_port, platform_name, pass_seconds)
 
         # Start just past a wall-clock minute boundary, so the minute never rolls
         # over mid-capture -- a changing digit would be a seam of its own.  The
         # panel is recorded unlit and normalized during encoding, exactly as
         # pebble-tool does, because nothing we can inject lights a watchface.
-        wait = 60 - (time.time() % 60) + 1.0
-        if wait < 2.0:
-            wait += 60
-        print("  waiting {:.1f}s for a clean window...".format(wait))
-        time.sleep(wait)
+        if getattr(self.args, "force_robot", False):
+            # Catalogue time, with enough seconds before the next minute to
+            # record the entire run. This only changes this isolated emulator.
+            self._set_time(pebble, datetime.datetime.now().replace(
+                hour=10, minute=8, second=59, microsecond=0))
+            # Cross a real minute tick while still at rest, so the baseline
+            # frame already has catalogue digits before starting the run.
+            time.sleep(2)
+        else:
+            wait = 60 - (time.time() % 60) + 1.0
+            if wait < 2.0:
+                wait += 60
+            print("  waiting {:.1f}s for a clean window...".format(wait))
+            time.sleep(wait)
 
-        # A tap restarts the run from the centred offset the scene is resting at.
-        send_data_to_qemu(pebble.transport, QemuTap(axis=QemuTap.Axis.X, direction=1))
-
-        duration = pass_seconds * (1 + CAPTURE_MARGIN)
+        duration = pass_seconds * (passes + CAPTURE_MARGIN)
         print("  capturing {:.1f}s at up to {} fps...".format(duration, self.args.fps))
         temp_dir = tempfile.mkdtemp(prefix="pebble-loop-")
         requests = []
         try:
+            if getattr(self.args, "force_robot", False):
+                # Save the centred frame before waiting for the launch ACK;
+                # that round trip can otherwise lose the first moving frames.
+                baseline = os.path.join(temp_dir, "baseline.ppm")
+                stamp = time.perf_counter()
+                self._qemu_monitor_command(monitor_port, "screendump " + baseline)
+                if _read_ppm(baseline) is None:
+                    raise ToolError("Could not capture the centred baseline.")
+                requests.append((stamp, baseline))
+                set_force_robot(pebble, self._app_uuid)
+            else:
+                send_data_to_qemu(pebble.transport, QemuTap(axis=QemuTap.Axis.X, direction=1))
             # Only ask QEMU for dumps in here, and decode them afterwards: the
             # writes are asynchronous, so waiting for each file to land would
             # both slow the loop down and race the last of the bytes.
@@ -366,7 +472,7 @@ def _panel_centre(frame, band, threshold):
     weighted = 0
     for y in range(top, bottom):
         for x in range(width):
-            r, g, b = pixels[x, y]
+            r, g, b = pixels[x, y][:3]
             if min(r, g, b) >= threshold:
                 count += 1
                 weighted += x
@@ -375,11 +481,13 @@ def _panel_centre(frame, band, threshold):
     return weighted / float(count)
 
 
-def _trim_to_pass(frames, fps, pass_seconds):
-    """Keep frames[0:seam], one billboard pass, measured off the clock panel."""
+def _trim_to_pass(frames, fps, pass_seconds, passes=1):
+    """Keep whole billboard passes, with the seam measured off the clock panel."""
     band = _billboard_band(frames[0].size[1])
     peak = max(max(channel[1] for channel in frame.getextrema()) for frame in frames)
-    centres = [_panel_centre(frame, band, peak * 0.55) for frame in frames]
+    # Pale windows bottom out at 170/255, while the digits reach 255/255.
+    # A lower threshold invents extra crossings in the billboard's gap.
+    centres = [_panel_centre(frame, band, peak * 0.85) for frame in frames]
     if centres[0] is None:
         raise ToolError("Billboard was not on screen at the start of the capture.")
 
@@ -390,20 +498,26 @@ def _trim_to_pass(frames, fps, pass_seconds):
     # the gap the board has not gone anywhere yet, and stray near-white pixels
     # from the lit windows jitter the centre by a fraction of a pixel, so walking
     # until the distance grows stops early on the jitter rather than at the seam.
-    gap = next((i for i in range(1, len(centres))
-                if centres[i] is None and any(c is not None for c in centres[i:])), None)
-    if gap is None:
-        raise ToolError("Capture did not cover a pass: the billboard never left and came back.")
-    crossing = next((i for i in range(gap, len(centres)) if centres[i] is not None), None)
-    if crossing is None:
-        raise ToolError("Capture ended during the billboard's pause; record for longer.")
-    end = next((i for i in range(crossing, len(centres)) if centres[i] is None), len(centres))
+    cursor = 1
+    for _ in range(passes):
+        gap = next((i for i in range(cursor, len(centres))
+                    if centres[i] is None), None)
+        if gap is None:
+            raise ToolError("Capture did not cover all billboard passes.")
+        crossing = next((i for i in range(gap, len(centres))
+                         if centres[i] is not None), None)
+        if crossing is None:
+            raise ToolError("Capture ended during the billboard's pause; record for longer.")
+        end = next((i for i in range(crossing, len(centres))
+                    if centres[i] is None), len(centres))
+        cursor = end
 
     seam = min(range(crossing, end), key=lambda i: abs(centres[i] - centres[0]))
     offset = centres[seam] - centres[0]
 
     measured = seam / fps
-    print("  pass is {} frames ({:.2f}s, nominal {:.2f}s); billboard lands {:+.1f}px "
+    pass_seconds *= passes
+    print("  capture is {} frames ({:.2f}s, nominal {:.2f}s); billboard lands {:+.1f}px "
           "from where it started".format(seam, measured, pass_seconds, offset))
     if end == len(centres):
         print("  warning: the capture ended before the billboard left again, so the seam is "
@@ -418,6 +532,53 @@ def _trim_to_pass(frames, fps, pass_seconds):
             "seam is probably wrong. Pass --pass-seconds to override the expected "
             "length.".format(measured, pass_seconds))
     return frames[:seam]
+
+
+def _robot_centre(frame):
+    """Locate the robot's lavender armour, excluding the UFO and sunset palette."""
+    width, height = frame.size
+    pixels = frame.load()
+    count, weighted = 0, 0
+    for y in range(height * 45 // 228, height * 186 // 228):
+        for x in range(width):
+            pixel = pixels[x, y]
+            r, g, b = pixel[:3]
+            if len(pixel) == 4 and pixel[3] == 0:
+                continue
+            if r > 40 and r * 0.35 < g < r * 0.7 and b > r * 1.35:
+                count += 1
+                weighted += x
+    return weighted / count if count >= max(8, width // 20) else None
+
+
+def _has_robot(frames):
+    centres = [c for frame in frames if (c := _robot_centre(frame)) is not None]
+    return len(centres) >= 3 and centres[-1] - centres[0] > frames[0].width / 4
+
+
+def _verify_robot_animation(filename, expected_seconds):
+    frames, seconds = _read_loop(filename)
+    if not _has_robot(frames):
+        raise ToolError("Encoded animation contains no walking robot: " + filename)
+    if abs(seconds - expected_seconds) > 0.1:
+        raise ToolError("Encoded animation duration differs from the captured run.")
+    print("  verified walking robot in decoded animation ({:.2f}s)".format(seconds))
+
+
+def _save_listing_stills(frames, platform, directory):
+    """Refresh the listing's billboard, skyline and robot PNGs from this run."""
+    frames[0].save(os.path.join(directory, platform + "-billboard.png"))
+    visible = [(abs(c - frame.width / 2), index) for index, frame in enumerate(frames)
+               if (c := _robot_centre(frame)) is not None]
+    _, robot_index = min(visible)
+    frames[robot_index].save(os.path.join(directory, platform + "-robot.png"))
+    band = _billboard_band(frames[0].height)
+    skyline = [(distance, index) for distance, index in visible
+               if _panel_centre(frames[index], band, 220) is None]
+    if not skyline:
+        raise ToolError("No skyline view with the robot and billboard offscreen.")
+    _, skyline_index = min(skyline)
+    frames[skyline_index].save(os.path.join(directory, platform + "-skyline.png"))
 
 
 def _read_loop(path):
@@ -635,6 +796,11 @@ def main():
     parser.add_argument("--convert", action="store_true",
                         help="Re-encode the loops already in --out-dir into --format instead of "
                              "capturing new ones. Needs no emulator.")
+    parser.add_argument("--force-robot", action="store_true",
+                        help="Force the robot for this launch, record both billboard passes, "
+                             "verify its motion and refresh the listing stills.")
+    parser.add_argument("--headless", action="store_true",
+                        help="Capture using an isolated emulator without opening a window.")
     parser.add_argument("--frame-step", type=int, default=1, metavar="N",
                         help="Keep only every Nth frame. Halves the file size per doubling, at "
                              "the cost of a coarser scroll; the loop still runs for a pass.")
@@ -669,11 +835,17 @@ def main():
             print("=== {} ===".format(platform_name))
             source = _find_loop(out_dir, platform_name, target_extension)
             frames, total_seconds = _read_loop(source)
+            if args.force_robot and not _has_robot(frames):
+                raise ToolError("Conversion rejected: source contains no walking robot.")
             print("  {} frames over {:.2f}s from {}".format(
                 len(frames), total_seconds, os.path.basename(source)))
             _encode(frames, os.path.join(out_dir, "{}-loop.{}".format(platform_name,
                                                                       target_extension)),
                     total_seconds, args.format)
+            if args.force_robot:
+                _verify_robot_animation(os.path.join(
+                    out_dir, "{}-loop.{}".format(platform_name, target_extension)),
+                    total_seconds)
         return
 
     print("PBW {} (version {})".format(pbw_path, version))

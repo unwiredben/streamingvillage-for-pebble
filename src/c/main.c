@@ -4,6 +4,8 @@
 
 #include "city_gen.h"
 #include "city_layer.h"
+#include "robot.h"
+#include "ufo.h"
 
 // ---------------------------------------------------------------------------
 // Scene layout.  Every length is derived from the emery reference (200x228) by
@@ -113,6 +115,7 @@ static Window *s_window;
 static Layer *s_scene_layer;
 static AppTimer *s_timer;
 static bool s_in_focus;
+static bool s_force_robot;     // current launch only; never persisted
 static int s_obstruction_dy;
 
 static GBitmap *s_sky;
@@ -122,6 +125,8 @@ static uint8_t s_passes_left;   // billboard passes left in this run
 static CityLayer s_background;
 static CityLayer s_foreground;
 static CityLayer s_billboard;
+static Robot s_robot;
+static Ufo s_ufo;
 
 static char s_time_text[8] = "--:--";
 
@@ -193,6 +198,9 @@ static void scene_update_proc(Layer *layer, GContext *ctx) {
                                  GRect(0, dy, bounds.size.w, SKY_H));
   }
   city_layer_draw(&s_background, ctx, dy);
+  // The near towers occlude the visitor without a separate clipping mask.
+  robot_draw(&s_robot, ctx, dy);
+  ufo_draw(&s_ufo, ctx, dy);
   city_layer_draw(&s_foreground, ctx, dy);
   const int billboard_origin = city_layer_draw(&s_billboard, ctx, dy);
   graphics_context_set_compositing_mode(ctx, GCompOpAssign);
@@ -210,6 +218,8 @@ static void frame_timer(void *context) {
   city_layer_advance(&s_background);
   city_layer_advance(&s_foreground);
   city_layer_advance(&s_billboard);
+  const bool robot_changed = robot_advance(&s_robot);
+  const bool ufo_changed = ufo_advance(&s_ufo);
 
   // A pass ends when the next step would carry the billboard back to, or past,
   // the centred rest position.  Land exactly on it -- which also keeps every
@@ -217,6 +227,8 @@ static void frame_timer(void *context) {
   if (city_layer_distance_to(&s_billboard, SUBPIX(BB_REST_PX)) <= BB_SPEED) {
     s_billboard.offset = SUBPIX(BB_REST_PX);
     if (--s_passes_left == 0) {
+      s_robot.active = false;
+      s_ufo.active = false;
       layer_mark_dirty(s_scene_layer);
       return;                    // no new timer: the scene holds still
     }
@@ -224,7 +236,8 @@ static void frame_timer(void *context) {
 
   // Fractional movement is invisible until it crosses a pixel boundary.
   // Keep advancing every frame, including during the billboard's pause.
-  if (bg_px != (s_background.offset >> SUBPIX_SHIFT) ||
+  if (robot_changed || ufo_changed ||
+      bg_px != (s_background.offset >> SUBPIX_SHIFT) ||
       fg_px != (s_foreground.offset >> SUBPIX_SHIFT) ||
       bb_px != (s_billboard.offset >> SUBPIX_SHIFT)) {
     layer_mark_dirty(s_scene_layer);
@@ -241,11 +254,45 @@ static void start_animation(void) {
   }
   s_passes_left = BB_PASSES;
   if (!s_timer) {
+    // Roll only for a fresh run: repeated activation events and taps keep
+    // the visitor's current position (or the current run's empty skyline).
+    // One roll selects at most one visitor for the entire run.
+    const int visitor = s_force_robot ? 0 : rand() % 3;
+    robot_start(&s_robot, visitor == 0);
+    ufo_start(&s_ufo, visitor == 1);
     s_timer = app_timer_register(FRAME_MS, frame_timer, NULL);
   }
 }
 
 static void tap_handler(AccelAxisType axis, int32_t direction) {
+  start_animation();
+}
+
+static void read_launch_options(void) {
+  // Native launch argument bit 0 is available to timeline openWatchApp actions.
+  s_force_robot = (launch_get_args() & 1u) != 0;
+}
+
+static void launch_options_received(DictionaryIterator *iter, void *context) {
+  const Tuple *force = dict_find(iter, MESSAGE_KEY_ForceRobot);
+  if (!force || (force->type != TUPLE_UINT && force->type != TUPLE_INT) ||
+      force->length != sizeof(uint32_t) || force->value->uint32 > 1) {
+    return;
+  }
+  s_force_robot = force->value->uint32 != 0;
+  // The CLI cannot pass native launch arguments. Its launcher sends this
+  // session option after installation, starting a fresh, centred run.
+  if (s_timer) {
+    app_timer_cancel(s_timer);
+    s_timer = NULL;
+  }
+  s_robot.active = false;
+  s_ufo.active = false;
+  s_billboard.offset = SUBPIX(BB_REST_PX);
+  s_billboard.pause_left = 0;
+  s_passes_left = 0;
+  update_time_text();
+  layer_mark_dirty(s_scene_layer);
   start_animation();
 }
 
@@ -257,6 +304,8 @@ static void focus_handler(bool in_focus) {
   if (in_focus) {
     start_animation();
   } else if (s_timer) {
+    s_robot.active = false;
+    s_ufo.active = false;
     app_timer_cancel(s_timer);
     s_timer = NULL;
     s_passes_left = 0;
@@ -342,6 +391,7 @@ static void window_unload(Window *window) {
 }
 
 static void init(void) {
+  read_launch_options();
   update_time_text();
 
   s_window = window_create();
@@ -352,6 +402,12 @@ static void init(void) {
     .unload = window_unload,
   });
   window_stack_push(s_window, false);
+
+  app_message_register_inbox_received(launch_options_received);
+  const AppMessageResult message_result = app_message_open(64, 32);
+  if (message_result != APP_MSG_OK) {
+    APP_LOG(APP_LOG_LEVEL_ERROR, "launch options unavailable: %d", message_result);
+  }
 
   tick_timer_service_subscribe(MINUTE_UNIT, tick_handler);
   accel_tap_service_subscribe(tap_handler);
@@ -367,6 +423,7 @@ static void init(void) {
 }
 
 static void deinit(void) {
+  app_message_deregister_callbacks();
   if (s_timer) {
     app_timer_cancel(s_timer);
     s_timer = NULL;

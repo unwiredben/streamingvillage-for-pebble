@@ -3,6 +3,22 @@
 A parallax cityscape at sunset. Three layers scroll right to left at different
 speeds, and the time rides past on a billboard.
 
+Each fresh animation run chooses a robot, a UFO, or an empty skyline with equal
+chances. The two visitors never appear together. The purple-and-blue robot
+strolls left to right behind the buildings, against the city's scrolling. Its
+cyan eyes and head peek above the rooftops while its arms swing and its body
+gently bobs. The silver-blue UFO has a cyan dome and blinking rim lights; it
+glides left to right above the rooftops, hovers at the center for two seconds,
+then continues offscreen. Both visitors share the scene's frame timer, leave
+before the run ends, and disappear when the watchface loses focus. Tapping
+during a run extends the city animation without switching or restarting visitors.
+
+The visitors are drawn with graphics primitives in `src/c/robot.c` and
+`src/c/ufo.c`, between the mountains and the foreground, so the towers naturally
+hide anything passing behind them. They need no bitmap resources or heap
+allocations; their geometry scales across all four
+platforms with the rest of the scene.
+
 ![billboard](screenshots/emery-billboard.png)
 ![skyline](screenshots/emery-skyline.png)
 ![the same scene on a Pebble Time](screenshots/basalt-billboard.png)
@@ -134,7 +150,8 @@ run.
 
 Taps while unfocused cannot restart the animation. Each timer step still
 advances all three scroll positions, but requests a redraw only if an integer
-pixel position changes (or the run ends). An uninterrupted run takes 506 steps
+pixel position changes, a visitor is active, or the run ends. An uninterrupted
+run without a visitor takes 506 steps
 and requests 486 animation redraws on emery, 386 and 366 on basalt, 462 and
 442 on chalk, 634 and 614 on gabbro; in every case the remaining 20 steps
 change only fractional
@@ -347,10 +364,18 @@ The cityscape is the exception: it is no longer written out, so
 ## Store animations
 
 `tools/capture_loop.py` records the scene in motion, one animated GIF per
-platform, for the storefront listings:
+platform, for the storefront listings. The 1.4.0 listing captures force the robot
+and keep both billboard passes, so each clip shows it entering and leaving:
 
-    tools/capture_loop.py                 # every target platform
-    tools/capture_loop.py basalt chalk    # just these
+    tools/capture_loop.py --force-robot --headless
+    tools/capture_loop.py basalt chalk --force-robot --headless
+
+The override applies only to the captured app session. Capture uses isolated
+emulator flash data and a separate process registry, leaving an existing emulator
+window alone. Before saving, it checks that the robot's lavender armour moves
+left to right across the display; a UFO or empty skyline cannot pass the check.
+It also refreshes each platform's billboard, skyline and robot PNG stills at
+10:09. Without `--force-robot`, the original single-pass capture remains available.
 
 GIF is the default because it is the only format the stores actually animate.
 They reject WebP outright, and they accept an APNG upload but serve back only
@@ -359,8 +384,13 @@ are smaller and exactly lossless, so they are worth keeping as masters — and
 `--convert` re-encodes whatever is already in `screenshots/` into another format
 without going near the emulator:
 
-    tools/capture_loop.py --format apng   # lossless masters
-    tools/capture_loop.py --convert       # masters -> GIF for the store
+    tools/capture_loop.py --force-robot --headless --format apng
+    tools/capture_loop.py --force-robot --convert
+
+The conversion check runs on the decoded master too, ensuring the GIF source
+contains the walking robot. Run `tests/test_capture_loop.py` with pebble-tool's
+Python environment to check recognition of dim displays, rejection of the UFO
+and static artwork, and trimming of two billboard passes.
 
 The script installs the app in the emulator, waits for the activation run to
 come to rest, taps the watch to start a fresh one, and pulls frames off the
@@ -371,7 +401,9 @@ by the time that capture starts the run has long since stopped.
 
 ### One pass, and finding where it ends
 
-The clip is one billboard pass. A run is a whole number of passes and both
+The default clip is one billboard pass; `--force-robot` keeps the whole two-pass
+run, so the robot has left the frame before the animation loops. A run is a whole
+number of passes and both
 starts and ends at the centred offset, so one pass is the shortest segment that
 begins and ends with the billboard — and so the clock — in the same place. It
 is not a perfect loop, and nothing short enough to be one exists: the three
@@ -398,7 +430,7 @@ imply, is an error rather than a bad file.
 
 Nothing about the emulator's timing can be taken on faith. Installing the app
 activates it, which starts a run of its own, and that has to finish before the
-tap or the tap merely extends it — so the script watches the billboard until it
+tap or the tap merely extends it — so the script watches the whole scene until it
 stops instead of sleeping on the nominal figure. Sleeping was not paranoid
 enough: because a run ends a fixed number of billboard crossings after the tap
 rather than a fixed time, an early tap can leave the scene coming to rest
@@ -425,23 +457,22 @@ whole frames does.
 ### Colour and the unlit panel
 
 Nothing that can be injected lights the backlight on a watchface, so the panel
-is recorded unlit — a flat 67% linear scale — and scaled back up per frame.
+is recorded unlit and scaled back up using the brightest captured channel.
 That reconstruction is good to a single level but not exact, because the
 emulator floors some channels on the way down: the palette lands on 84 and 170
 where the display's 64-colour grid has 85 and 170.
 
-The GIFs are visibly lossless. basalt, emery and gabbro come back pixel-for-
-pixel identical to the APNG masters, because the art uses fifteen colours and a
-GIF holds 256. chalk is the one exception, and only at the rim: its emulator
-antialiases the edge of the round display, which pushes the count to 259 and
-over what is left after reserving an entry for transparency, so 0.4% of its
-pixels shift by at most 6 of 255. The round displays keep their transparent
+The scene uses a small palette that fits GIF, while emulator antialiasing at
+round display rims can require palette approximation. The APNG masters preserve
+the captured pixels. The round displays keep their transparent
 corners, which is also why their frames carry a dispose-to-background flag
 rather than the retain-previous one the rectangular platforms use.
 
-At 230 KiB to 2.2 MiB the files are large but within what the stores take;
-`--frame-step N` roughly halves the size per doubling if one of them ever
-refuses, and shortens nothing.
+The refreshed two-pass GIFs range from about 0.55 to 4.1 MiB. `--frame-step N`
+reduces the captured frame count while preserving the full run duration.
+`store/assets-1.4.0.json` records dimensions, timings, robot visibility and file
+hashes. `store/streaming-village-1.4.0-assets.zip` packages the four GIFs, four
+APNG masters, twelve listing stills, two icons and that verification manifest.
 
 ## Build
 
@@ -451,6 +482,17 @@ refuses, and shortens nothing.
     pebble install --emulator chalk
     pebble install --emulator gabbro
     pebble install --cloudpebble         # a real watch, via the phone
+
+To launch the emulator with a guaranteed robot on every run in that session:
+
+    python3 tools/launch.py --emulator emery --force-robot
+    python3 tools/launch.py --emulator emery   # return to random visitors
+
+The launcher installs the current build and sends the temporary `ForceRobot`
+option (AppMessage key 1, a 32-bit integer 0 or 1). It restarts the animation at
+the centred billboard and never persists the override. Native timeline launch
+argument bit 0 enables the same behavior. Ordinary launches use the existing
+equal-probability robot/UFO/empty selection.
 
 gabbro needs a recent SDK: it first appears in 4.33.1.
 
@@ -470,7 +512,11 @@ geometry checks on the host (requires GCC and the Pebble SDK):
 The host checks replace platform timers and graphics calls with recording
 stubs. They cover focus loss and taps, animation completion and redraw counts,
 minute updates, obstruction movement, and billboard placement across every
-scroll position in a tile with several notification offsets. The artwork check
+scroll position in a tile with several notification offsets. Robot checks cover
+appearance selection, movement and departure, repeated activation and taps,
+unchanged run duration, and hiding on focus loss. Visitor checks also cover all
+three choices, mutual exclusion on every frame and the UFO's two-second hover.
+The artwork check
 compares each platform's cropped resource with the original full-width
 procedural artwork, asserts the layout invariants `main.c` derives from, and
 sizes each platform's resource pack against the 256KB appstore ceiling.

@@ -7,6 +7,8 @@
 #undef main
 #include "../src/c/city_layer.c"
 #include "../src/c/city_gen.c"
+#include "../src/c/robot.c"
+#include "../src/c/ufo.c"
 #undef fprintf
 
 #define CHECK(condition) do { \
@@ -52,6 +54,13 @@ static int visible_height = PBL_DISPLAY_HEIGHT;
 static int bitmap_token;
 static int bitmap_draws;
 static GRect bitmap_rect;
+static int random_value = 2;
+int rand(void) { return random_value; }
+static uint32_t launch_args;
+uint32_t launch_get_args(void) { return launch_args; }
+Tuple *dict_find(const DictionaryIterator *iter, const uint32_t key) {
+  return iter->cursor && iter->cursor->key == key ? iter->cursor : NULL;
+}
 
 GBitmap *gbitmap_create_with_resource(uint32_t id) {
   CHECK(id == RESOURCE_ID_IMG_BB_0);
@@ -172,6 +181,154 @@ int main(int argc, char **argv) {
       }
     }
     city_layer_deinit(&s_billboard);
+  } else if (strcmp(argv[1], "robot") == 0) {
+    // A selected fresh run spawns once; appear + did_focus and taps must
+    // neither reroll the chance nor teleport a robot already in motion.
+    random_value = 0;
+    window_appear(NULL);
+    CHECK(s_robot.active);
+    CHECK(s_robot.x == -ROBOT_W * 16);
+    int32_t initial_x = s_robot.x;
+    frame_timer(NULL);
+    int32_t x = s_robot.x;
+    CHECK(x > initial_x);
+    CHECK(s_robot.frame == 1);
+    focus_handler(true);
+    tap_handler(ACCEL_AXIS_X, 1);
+    CHECK(s_robot.x == x);
+    CHECK(s_robot.frame == 1);
+    int frames = 1;
+    while (s_robot.active && frames < 1000) {
+      frame_timer(NULL);
+      frames++;
+    }
+    CHECK(frames < EXPECT_FRAMES);
+    CHECK(s_robot.x >= PBL_DISPLAY_WIDTH * 16);
+    while (s_timer) {
+      frame_timer(NULL);
+      frames++;
+    }
+    CHECK(!s_robot.active);
+    CHECK(s_billboard.offset == SUBPIX(BB_REST_PX));
+    CHECK_EQ(frames, EXPECT_FRAMES);
+    // The other two outcomes skip the robot.
+    for (int outcome = 1; outcome <= 2; outcome++) {
+      random_value = outcome;
+      start_animation();
+      CHECK(!s_robot.active);
+      focus_handler(false);
+      CHECK(!s_timer);
+      s_in_focus = true;
+    }
+    random_value = 0;
+    start_animation();
+    CHECK(s_robot.active);
+    focus_handler(false);
+    CHECK(!s_robot.active);
+    CHECK(!s_timer);
+  } else if (strcmp(argv[1], "visitors") == 0) {
+    for (int choice = 0; choice < 3; choice++) {
+      random_value = choice;
+      window_appear(NULL);
+      CHECK(s_robot.active == (choice == 0));
+      CHECK(s_ufo.active == (choice == 1));
+      int frames = 0;
+      int hover_frames = 0;
+      bool crossed_center = false;
+      int32_t previous_x = s_ufo.x;
+      while (s_timer && frames < 1000) {
+        CHECK(!(s_robot.active && s_ufo.active));
+        bool was_active = s_ufo.active;
+        frame_timer(NULL);
+        frames++;
+        if (choice == 1 && was_active) {
+          CHECK(s_ufo.x >= previous_x);
+          if (s_ufo.x == previous_x) {
+            CHECK(s_ufo.x == (PBL_DISPLAY_WIDTH - UFO_W) * 8);
+            hover_frames++;
+          }
+          if (s_ufo.x > (PBL_DISPLAY_WIDTH - UFO_W) * 8)
+            crossed_center = true;
+          previous_x = s_ufo.x;
+        }
+        if (frames == 10) {
+          // A different random outcome during a tap must not switch visitors.
+          int32_t x = s_ufo.x;
+          uint16_t pose = s_ufo.frame;
+          random_value = (choice + 1) % 3;
+          focus_handler(true);
+          tap_handler(ACCEL_AXIS_X, 1);
+          CHECK(s_robot.active == (choice == 0));
+          CHECK(s_ufo.active == (choice == 1));
+          CHECK(s_ufo.x == x && s_ufo.frame == pose);
+        }
+      }
+      CHECK_EQ(frames, EXPECT_FRAMES);
+      CHECK(!s_robot.active && !s_ufo.active);
+      if (choice == 1) {
+        CHECK_EQ(hover_frames, 2000 / FRAME_MS);
+        CHECK(crossed_center);
+        CHECK(s_ufo.x >= PBL_DISPLAY_WIDTH * 16);
+      }
+    }
+    random_value = 1;
+    start_animation();
+    CHECK(s_ufo.active && !s_robot.active);
+    focus_handler(false);
+    CHECK(!s_ufo.active && !s_robot.active && !s_timer);
+    tap_handler(ACCEL_AXIS_X, 1);
+    CHECK(!s_ufo.active && !s_robot.active && !s_timer);
+  } else if (strcmp(argv[1], "launch") == 0) {
+    launch_args = 1;
+    read_launch_options();
+    random_value = 1; // Would select the UFO without the override.
+    window_appear(NULL);
+    CHECK(s_force_robot && s_robot.active && !s_ufo.active);
+    while (s_timer) frame_timer(NULL);
+    start_animation();
+    CHECK(s_robot.active && !s_ufo.active);
+
+    uint8_t buffer[sizeof(Tuple) + sizeof(uint32_t)] = {0};
+    Tuple *tuple = (Tuple *)buffer;
+    tuple->key = 1;
+    tuple->type = TUPLE_UINT;
+    tuple->length = 4;
+    tuple->value->uint32 = 0;
+    DictionaryIterator iter = {.cursor = tuple};
+    launch_options_received(&iter, NULL);
+    CHECK(!s_force_robot && !s_robot.active && s_ufo.active);
+    tuple->value->uint32 = 1;
+    memcpy(s_time_text, "--:--", 6);
+    launch_options_received(&iter, NULL);
+    CHECK(s_force_robot && s_robot.active && !s_ufo.active);
+    CHECK(strcmp(s_time_text, "12:34") == 0);
+    CHECK(s_robot.x == -ROBOT_W * 16);
+    CHECK(s_billboard.offset == SUBPIX(BB_REST_PX));
+    int timers = timer_count;
+    // Reject malformed values without restarting or changing the override.
+    tuple->type = TUPLE_CSTRING;
+    launch_options_received(&iter, NULL);
+    tuple->type = TUPLE_UINT;
+    tuple->length = 1;
+    launch_options_received(&iter, NULL);
+    tuple->length = 4;
+    tuple->value->uint32 = 2;
+    launch_options_received(&iter, NULL);
+    tuple->key = 99;
+    launch_options_received(&iter, NULL);
+    CHECK(s_force_robot && timer_count == timers);
+    focus_handler(false);
+    tuple->key = 1;
+    tuple->value->uint32 = 1;
+    launch_options_received(&iter, NULL);
+    CHECK(s_force_robot && !s_robot.active && !s_ufo.active && !s_timer);
+    launch_args = 2; // Unrelated launch bits do not force the robot.
+    read_launch_options();
+    CHECK(!s_force_robot);
+    launch_args = 0;
+    read_launch_options();
+    focus_handler(true);
+    CHECK(!s_robot.active && s_ufo.active);
   } else {
     CHECK(false);
   }

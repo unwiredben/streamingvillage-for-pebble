@@ -1,7 +1,7 @@
 {
   "name": "Streaming Village",
   "author": "Ben Combee <combee@techwood.org>",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "license": "MIT",
   "keywords": [
     "pebble-app"
@@ -12,6 +12,9 @@
     "displayName": "Streaming Village",
     "uuid": "fb61b0cc-998d-4681-a12b-40205a9dd3b2",
     "sdkVersion": "3",
+    "messageKeys": {
+      "ForceRobot": 1
+    },
     "targetPlatforms": [
       "basalt",
       "chalk",

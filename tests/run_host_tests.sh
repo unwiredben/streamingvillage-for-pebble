@@ -35,9 +35,10 @@ for platform in "${platforms[@]}"; do
     -DPBL_COLOR $defines \
     -Itests/include -I"$PEBBLE_SDK_PEBBLE/$platform/include" \
     -Ibuild/include -I"build/$platform" \
-    tests/power_savings.c -Wl,--gc-sections -o "$test_binary"
+    tests/power_savings.c build/src/message_keys.auto.c \
+    -Wl,--gc-sections -o "$test_binary"
 
-  for scenario in focus frames obstruction billboard; do
+  for scenario in focus frames obstruction billboard robot visitors launch; do
     if "$test_binary" "$scenario"; then
       echo "PASS: $platform $scenario"
     else

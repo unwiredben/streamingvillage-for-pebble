@@ -1,0 +1,94 @@
+{
+  "version": "1.4.0",
+  "captured_at": "2026-10-26T20:05:31.479424+00:00",
+  "capture_time": "10:09",
+  "force_robot": true,
+  "billboard_passes": 2,
+  "bundle_sha256": "655b4dffdd88f206713b45ebf56b2b2434894467118b96c6449c5780a56fedbc",
+  "icons": [
+    "store/icon-80.png",
+    "store/icon-144.png"
+  ],
+  "platforms": {
+    "basalt": {
+      "gif": "screenshots/basalt-loop.gif",
+      "master": "screenshots/basalt-loop.png",
+      "stills": {
+        "billboard": "screenshots/basalt-billboard.png",
+        "skyline": "screenshots/basalt-skyline.png",
+        "robot": "screenshots/basalt-robot.png"
+      },
+      "frames": 359,
+      "duration_seconds": 19.3,
+      "robot_visible_frames": 205,
+      "robot_x_first": 0.5,
+      "robot_x_last": 143.0,
+      "robot_enters_and_exits": true,
+      "clock_unchanged_at_cut": true,
+      "gif_bytes": 570050,
+      "gif_sha256": "5a9773169ed6ab575b6b0d00e4d6262b959f224016be1e24f88d513cb47f75dc",
+      "width": 144,
+      "height": 168
+    },
+    "chalk": {
+      "gif": "screenshots/chalk-loop.gif",
+      "master": "screenshots/chalk-loop.png",
+      "stills": {
+        "billboard": "screenshots/chalk-billboard.png",
+        "skyline": "screenshots/chalk-skyline.png",
+        "robot": "screenshots/chalk-robot.png"
+      },
+      "frames": 463,
+      "duration_seconds": 23.1,
+      "robot_visible_frames": 199,
+      "robot_x_first": 15.22,
+      "robot_x_last": 170.21,
+      "robot_enters_and_exits": true,
+      "clock_unchanged_at_cut": true,
+      "gif_bytes": 2194905,
+      "gif_sha256": "2ec81ed648e6a0ecd7c3974a497c07277d57a3887188a74af253711de7760cf1",
+      "width": 180,
+      "height": 180
+    },
+    "emery": {
+      "gif": "screenshots/emery-loop.gif",
+      "master": "screenshots/emery-loop.png",
+      "stills": {
+        "billboard": "screenshots/emery-billboard.png",
+        "skyline": "screenshots/emery-skyline.png",
+        "robot": "screenshots/emery-robot.png"
+      },
+      "frames": 521,
+      "duration_seconds": 25.3,
+      "robot_visible_frames": 213,
+      "robot_x_first": 0.5,
+      "robot_x_last": 193.0,
+      "robot_enters_and_exits": true,
+      "clock_unchanged_at_cut": true,
+      "gif_bytes": 1035279,
+      "gif_sha256": "ceb1e77339818de7f0a93eeb29ab925bd694590c65149257292f168c31c1f79a",
+      "width": 200,
+      "height": 228
+    },
+    "gabbro": {
+      "gif": "screenshots/gabbro-loop.gif",
+      "master": "screenshots/gabbro-loop.png",
+      "stills": {
+        "billboard": "screenshots/gabbro-billboard.png",
+        "skyline": "screenshots/gabbro-skyline.png",
+        "robot": "screenshots/gabbro-robot.png"
+      },
+      "frames": 653,
+      "duration_seconds": 31.7,
+      "robot_visible_frames": 204,
+      "robot_x_first": 20.94,
+      "robot_x_last": 237.0,
+      "robot_enters_and_exits": true,
+      "clock_unchanged_at_cut": true,
+      "gif_bytes": 4226448,
+      "gif_sha256": "a1a50d2591817831d286143756ed61932f813eb166f302576af10be5b612386b",
+      "width": 260,
+      "height": 260
+    }
+  }
+}
